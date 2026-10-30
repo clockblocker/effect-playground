@@ -30,6 +30,15 @@ forwards Ctrl-C to it. The Bun server listens on 5201 and Vite proxies `/api`
 and `/rpc` to it. `EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT`
 move those.
 
+If the launcher dies some other way, even by SIGKILL or a crash, a watchdog
+process it forks at startup stops the Bun server within a second, `--watch`
+included (see `cpp/src/watchdog.hpp`). SIGINT or SIGTERM to the launcher stop
+everything too.
+
+Stop `bun run dev` with Ctrl-C, which signals every process in it. `bun run`
+doesn't forward SIGTERM to its children: `kill <pid of bun run dev>` leaves
+the launcher, the Bun server and Vite running.
+
 `bun run dev:server` runs the Bun server alone; there, `reader: "cpp"` fails
 with `ReaderUnavailable`, as it does when the C++ process dies.
 

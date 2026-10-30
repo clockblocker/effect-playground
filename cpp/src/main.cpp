@@ -8,7 +8,9 @@
 //       $EFFECT_PLAYGROUND_CPP_PORT or an ephemeral port, reading DIR
 //       (default: ./files). With a COMMAND, it spawns it with the port in
 //       $EFFECT_PLAYGROUND_CPP_PORT, forwards SIGINT, SIGTERM and SIGHUP to
-//       it, and exits with its status. Without one, it serves until signalled.
+//       it, and exits with its status. If the launcher itself dies, a
+//       watchdog stops the child (see watchdog.hpp). Without a COMMAND, it
+//       serves until signalled.
 
 #include <spawn.h>
 #include <sys/wait.h>
@@ -18,12 +20,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "reader_protocol.hpp"
 #include "tcp_server.hpp"
+#include "watchdog.hpp"
 
 extern char** environ;
 
@@ -181,13 +185,20 @@ int main(int argc, char** argv) {
 	}
 
 	const sigset_t waited = block_waited_signals();
+	// Forked before the reader's thread and socket exist, so it holds neither.
+	const std::optional<watchdog::Watchdog> guard =
+		options.command.empty() ? std::nullopt
+								: std::optional(watchdog::start());
 	const auto files = std::filesystem::absolute(options.files);
 	const auto listener = tcp_server::listen_on_loopback(requested_port());
 	tcp_server::serve_in_background(listener, files);
 	std::cerr << log_prefix << "reading " << files.string()
 			  << " over JSON-RPC on 127.0.0.1:" << listener.port << std::endl;
 
-	const pid_t child =
-		options.command.empty() ? 0 : spawn(options.command, listener.port);
-	return supervise(waited, child);
+	if (!guard) return supervise(waited, 0);
+	const pid_t child = spawn(options.command, listener.port);
+	watchdog::watch(*guard, child);
+	const int code = supervise(waited, child);
+	watchdog::stop(*guard);
+	return code;
 }

@@ -28,6 +28,7 @@ add_executable(effect-playground-cpp
 	src/json_rpc.cpp
 	src/read_file.cpp
 	src/tcp_server.cpp
+	src/watchdog.cpp
 )
 target_include_directories(effect-playground-cpp PRIVATE include)
 target_link_libraries(effect-playground-cpp PRIVATE reflectcpp)
