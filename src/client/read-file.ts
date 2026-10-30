@@ -1,104 +1,46 @@
-import { Effect, type Schema } from "effect";
-import type { HttpClientError } from "effect/http";
-import type { RpcClientError } from "effect/rpc";
-import type {
-	FileNotFound,
-	NotTxtFile,
-	ReaderUnavailable,
-} from "../shared/errors.ts";
+import { Effect, Match } from "effect";
+import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
 import type { Reader } from "../shared/reader.ts";
 import { RestFiles, RpcFilesClient } from "./clients.ts";
 
-/** How the page names each reader. */
-export const readerLabels: Record<Reader, string> = { bun: "Bun", cpp: "C++" };
+// One call per transport and reader. Each succeeds with the file's contents
+// and fails with exactly what it can fail with, so only the C++ calls list
+// ReaderUnavailable: hover one to see it.
 
-export type Outcome =
-	| { readonly kind: "contents"; readonly text: string }
-	| { readonly kind: "error"; readonly message: string };
-
-const contents = (text: string): Outcome => ({ kind: "contents", text });
-const failed = (message: string) =>
-	Effect.succeed<Outcome>({ kind: "error", message });
-const notTxt = (error: NotTxtFile) => failed(error.message);
-const notFound = (error: FileNotFound) => failed(error.message);
-const unavailable = (error: ReaderUnavailable) => failed(error.message);
-// Each transport's own errors and nothing else, so a domain error that
-// catchTags misses is a compile error rather than a silent "Request failed".
-const requestFailed = (error: { readonly message: string }) =>
-	failed(`Request failed: ${error.message}`);
-const restFailed = (
-	error: HttpClientError.HttpClientError | Schema.SchemaError,
-) => requestFailed(error);
-const rpcFailed = (error: RpcClientError.RpcClientError) =>
-	requestFailed(error);
-
-// Hover `read` in each function: the error channel lists that reader's domain
-// errors plus what the transport can fail with. catchTags covers the domain
-// errors (and rejects a tag the reader can't fail with, so the Bun functions
-// can't name ReaderUnavailable); Effect.catch takes the transport's.
-
-export const rest: Record<
-	Reader,
-	(name: string) => Effect.Effect<Outcome, never, RestFiles>
-> = {
-	bun: (name) =>
-		Effect.gen(function* () {
-			const files = yield* RestFiles;
-			const read = files.bun(name);
-			return yield* read.pipe(
-				Effect.map(contents),
-				Effect.catchTags({
-					NotTxtFile: notTxt,
-					FileNotFound: notFound,
-				}),
-				Effect.catch(restFailed),
-			);
-		}),
-	cpp: (name) =>
-		Effect.gen(function* () {
-			const files = yield* RestFiles;
-			const read = files.cpp(name);
-			return yield* read.pipe(
-				Effect.map(contents),
-				Effect.catchTags({
-					NotTxtFile: notTxt,
-					FileNotFound: notFound,
-					ReaderUnavailable: unavailable,
-				}),
-				Effect.catch(restFailed),
-			);
-		}),
+export const rest = {
+	bun: (name: string) => RestFiles.use((files) => files.bun(name)),
+	cpp: (name: string) => RestFiles.use((files) => files.cpp(name)),
 };
 
-export const rpc: Record<
-	Reader,
-	(name: string) => Effect.Effect<Outcome, never, RpcFilesClient>
-> = {
-	bun: (name) =>
-		Effect.gen(function* () {
-			const client = yield* RpcFilesClient;
-			const read = client.ReadFileBun({ name });
-			return yield* read.pipe(
-				Effect.map((success) => contents(success.contents)),
-				Effect.catchTags({
-					NotTxtFile: notTxt,
-					FileNotFound: notFound,
-				}),
-				Effect.catch(rpcFailed),
-			);
-		}),
-	cpp: (name) =>
-		Effect.gen(function* () {
-			const client = yield* RpcFilesClient;
-			const read = client.ReadFileCpp({ name });
-			return yield* read.pipe(
-				Effect.map((success) => contents(success.contents)),
-				Effect.catchTags({
-					NotTxtFile: notTxt,
-					FileNotFound: notFound,
-					ReaderUnavailable: unavailable,
-				}),
-				Effect.catch(rpcFailed),
-			);
-		}),
+// RPC answers with the success struct; its contents make it look like REST.
+const contents = (success: ReadFileSuccess) => success.contents;
+
+export const rpc = {
+	bun: (name: string) =>
+		RpcFilesClient.use((client) =>
+			Effect.map(client.ReadFileBun({ name }), contents),
+		),
+	cpp: (name: string) =>
+		RpcFilesClient.use((client) =>
+			Effect.map(client.ReadFileCpp({ name }), contents),
+		),
 };
+
+/** Whatever any of the calls can fail with. */
+export type ReadFailure = Effect.Error<
+	ReturnType<(typeof rest | typeof rpc)[Reader]>
+>;
+
+/**
+ * What the page says when a call fails. The domain errors say it themselves;
+ * the transport errors are the client's own, so their wording lives here.
+ */
+export const describeFailure = Match.type<ReadFailure>().pipe(
+	Match.tag(
+		"HttpClientError",
+		"SchemaError",
+		"RpcClientError",
+		(error) => `Request failed: ${error.message}`,
+	),
+	Match.orElse((error) => error.message),
+);

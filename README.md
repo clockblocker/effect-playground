@@ -123,10 +123,14 @@ The C++ integration tests skip when `cmake` isn't on the PATH.
   the RPC group, and the generated reader protocol.
 - `src/server/` holds `BunReader` and `CppReader`, and the two transports
   mounted on one router; each handler calls the reader its endpoint names.
-- `src/client/` builds both clients and maps each outcome to UI state, with
-  one function per transport and reader (`rest.bun`, `rpc.cpp`, …). `App`
-  builds the form schema from the generated `ReadFileRequest` plus `Reader`,
-  and passes it to each panel, whose react-hook-form resolver uses it.
+- `src/client/` builds both clients, with one call per transport and reader
+  (`rest.bun`, `rpc.cpp`, …). Each returns the contents, failing with exactly
+  that call's errors. A panel runs one through `Effect.result` and renders
+  the `Result`; on failure it shows `describeFailure`, which is the error's
+  own `message` for the domain errors and the client's wording for transport
+  errors. `App` builds the form schema from the generated `ReadFileRequest`
+  plus `Reader`, and passes it to each panel, whose react-hook-form resolver
+  uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
   `bun run check` runs.
 - `scripts/` builds the C++ and runs the code generator.

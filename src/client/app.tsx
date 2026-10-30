@@ -1,12 +1,12 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
-import { type Effect, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { useId, useMemo, useState } from "react";
 import { type UseFormRegisterReturn, useForm } from "react-hook-form";
 import { ReadFileRequest } from "../shared/generated/reader-protocol.ts";
 import { Reader } from "../shared/reader.ts";
 import type { RestFiles, RpcFilesClient } from "./clients.ts";
 import { runtime } from "./clients.ts";
-import { type Outcome, readerLabels, rest, rpc } from "./read-file.ts";
+import { describeFailure, type ReadFailure, rest, rpc } from "./read-file.ts";
 
 // What a panel's form holds: the generated request, so the 5–25 rule and its
 // messages come from the C++ struct, plus which reader to send it to.
@@ -33,12 +33,12 @@ function ReaderPanel({
 	title: string;
 	/** Validates the form; its type is the form's values. */
 	schema: ReadFileForm;
-	// One function per reader; the switch picks which one a submit calls.
+	// One call per reader; the switch picks which one a submit makes.
 	readers: Record<
 		Reader,
 		(
 			name: string,
-		) => Effect.Effect<Outcome, never, RestFiles | RpcFilesClient>
+		) => Effect.Effect<string, ReadFailure, RestFiles | RpcFilesClient>
 	>;
 }) {
 	// The types come from the schema, spelled out because inference through
@@ -63,15 +63,18 @@ function ReaderPanel({
 			reader: "bun",
 		} satisfies ReadFileForm["Encoded"],
 	});
-	const [outcome, setOutcome] = useState<Outcome | null>(null);
+	const [result, setResult] = useState<Result.Result<
+		string,
+		ReadFailure
+	> | null>(null);
 	const nameError = useId();
 
 	// Runs only once the values pass the schema, so a bad name sends nothing.
 	const submit = handleSubmit(async (values) => {
-		// The error channel is `never`, so this promise only rejects on a defect.
-		setOutcome(
-			await runtime.runPromise(readers[values.reader](values.name)),
-		);
+		// Effect.result turns a failure into a value, so this promise only
+		// rejects on a defect.
+		const read = readers[values.reader](values.name);
+		setResult(await runtime.runPromise(Effect.result(read)));
 	});
 
 	return (
@@ -94,13 +97,19 @@ function ReaderPanel({
 					</p>
 				)}
 			</form>
-			{outcome?.kind === "contents" && <pre>{outcome.text}</pre>}
-			{outcome?.kind === "error" && <p role="alert">{outcome.message}</p>}
+			{result &&
+				Result.match(result, {
+					onSuccess: (contents) => <pre>{contents}</pre>,
+					onFailure: (error) => (
+						<p role="alert">{describeFailure(error)}</p>
+					),
+				})}
 		</section>
 	);
 }
 
 const readerOrder: readonly Reader[] = ["bun", "cpp"];
+const readerLabels: Record<Reader, string> = { bun: "Bun", cpp: "C++" };
 
 function ReaderSwitch({ field }: { field: UseFormRegisterReturn<"reader"> }) {
 	// Radios group by form and name, so each panel's "reader" is its own group.

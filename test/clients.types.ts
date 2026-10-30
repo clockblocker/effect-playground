@@ -1,7 +1,7 @@
 // Type-level checks, run by `bun run check` (tsc), not by `bun test`: only
 // the C++ calls can fail with ReaderUnavailable, over REST and over RPC.
-import type { Context, Effect } from "effect";
-import type { RestFiles, RpcFilesClient } from "../src/client/clients.ts";
+import type { Effect } from "effect";
+import type { rest, rpc } from "../src/client/read-file.ts";
 import type { ReaderUnavailable } from "../src/shared/errors.ts";
 
 type FailsWith<Call, E> = Call extends (
@@ -15,12 +15,9 @@ type FailsWith<Call, E> = Call extends (
 type Expect<T extends true> = T;
 type Not<T extends boolean> = T extends true ? false : true;
 
-type Rest = Context.Service.Shape<typeof RestFiles>;
-type Rpc = Context.Service.Shape<typeof RpcFilesClient>;
-
 export type Checks = [
-	Expect<Not<FailsWith<Rest["bun"], ReaderUnavailable>>>,
-	Expect<FailsWith<Rest["cpp"], ReaderUnavailable>>,
-	Expect<Not<FailsWith<Rpc["ReadFileBun"], ReaderUnavailable>>>,
-	Expect<FailsWith<Rpc["ReadFileCpp"], ReaderUnavailable>>,
+	Expect<Not<FailsWith<typeof rest.bun, ReaderUnavailable>>>,
+	Expect<FailsWith<typeof rest.cpp, ReaderUnavailable>>,
+	Expect<Not<FailsWith<typeof rpc.bun, ReaderUnavailable>>>,
+	Expect<FailsWith<typeof rpc.cpp, ReaderUnavailable>>,
 ];
