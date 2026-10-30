@@ -1,13 +1,13 @@
-// effect-playground-cpp: the C++ file reader, and the launcher of the Bun
-// server that calls it.
+// effect-playground-backend: the backend, which reads files, and the
+// launcher of the BFF that calls it.
 //
-//   effect-playground-cpp --emit-schema
-//       Prints the reader protocol's JSON Schema and exits.
-//   effect-playground-cpp [--files DIR] [-- COMMAND...]
+//   effect-playground-backend --emit-schema
+//       Prints the backend protocol's JSON Schema and exits.
+//   effect-playground-backend [--files DIR] [-- COMMAND...]
 //       Serves the reader over JSON-RPC on 127.0.0.1, on
-//       $EFFECT_PLAYGROUND_CPP_PORT or an ephemeral port, reading DIR
+//       $EFFECT_PLAYGROUND_BACKEND_PORT or an ephemeral port, reading DIR
 //       (default: ./files). With a COMMAND, it spawns it with the port in
-//       $EFFECT_PLAYGROUND_CPP_PORT, forwards SIGINT, SIGTERM and SIGHUP to
+//       $EFFECT_PLAYGROUND_BACKEND_PORT, forwards SIGINT, SIGTERM and SIGHUP to
 //       it, and exits with its status. If the launcher itself dies, a
 //       watchdog stops the child (see watchdog.hpp). Without a COMMAND, it
 //       serves until signalled.
@@ -33,8 +33,8 @@ extern char** environ;
 
 namespace {
 
-constexpr std::string_view port_variable = "EFFECT_PLAYGROUND_CPP_PORT";
-constexpr std::string_view log_prefix = "effect-playground-cpp: ";
+constexpr std::string_view port_variable = "EFFECT_PLAYGROUND_BACKEND_PORT";
+constexpr std::string_view log_prefix = "effect-playground-backend: ";
 
 struct Options {
 	bool emit_schema = false;
@@ -44,8 +44,8 @@ struct Options {
 
 [[noreturn]] void usage_error(const std::string& message) {
 	std::cerr << log_prefix << message
-			  << "\nusage: effect-playground-cpp --emit-schema\n"
-				 "       effect-playground-cpp [--files DIR] [-- COMMAND...]\n";
+			  << "\nusage: effect-playground-backend --emit-schema\n"
+				 "       effect-playground-backend [--files DIR] [-- COMMAND...]\n";
 	std::exit(2);
 }
 
@@ -97,7 +97,7 @@ sigset_t block_waited_signals() {
 	pending.sa_handler = [](int) {};
 	for (const int signal : forwarded_signals) sigaction(signal, &pending, nullptr);
 	sigaction(SIGCHLD, &pending, nullptr);
-	// A client that hangs up mid-write must not kill the reader.
+	// A client that hangs up mid-write must not kill the backend.
 	std::signal(SIGPIPE, SIG_IGN);
 	return waited;
 }
@@ -183,7 +183,7 @@ int main(int argc, char** argv) {
 	}
 
 	const sigset_t waited = block_waited_signals();
-	// Forked before the reader's thread and socket exist, so it holds neither.
+	// Forked before the server's thread and socket exist, so it holds neither.
 	const std::optional<watchdog::Watchdog> guard =
 		options.command.empty() ? std::nullopt
 								: std::optional(watchdog::start());

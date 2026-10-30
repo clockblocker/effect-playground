@@ -1,55 +1,55 @@
 import { BunSocket } from "@effect/platform-bun";
 import { Config, Context, Effect, Layer, Option } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
+import { BackendUnavailable } from "../shared/backend-unavailable.ts";
 import {
-	ReaderProtocol,
+	BackendProtocol,
 	type ReadFile,
-} from "../shared/generated/reader-protocol.ts";
-import { ReaderUnavailable } from "../shared/reader-unavailable.ts";
+} from "../shared/generated/backend-protocol.ts";
 
-const unavailable = (detail: string) => new ReaderUnavailable({ detail });
+const unavailable = (detail: string) => new BackendUnavailable({ detail });
 
-// The C++ reader, called over JSON-RPC on the TCP port the launcher passes in
-// EFFECT_PLAYGROUND_CPP_PORT. A transport failure becomes ReaderUnavailable,
-// so the caller sees a typed error, not a defect.
-export class CppReader extends Context.Service<
-	CppReader,
+// The backend, called over JSON-RPC on the TCP port it passes the BFF in
+// EFFECT_PLAYGROUND_BACKEND_PORT when it launches it. A transport failure
+// becomes BackendUnavailable, so the caller sees a typed error, not a defect.
+export class BackendReader extends Context.Service<
+	BackendReader,
 	{
 		readonly read: (
 			name: string,
 		) => Effect.Effect<
 			ReadFile.Success,
-			ReadFile.Failure | ReaderUnavailable
+			ReadFile.Failure | BackendUnavailable
 		>;
 	}
->()("effect-playground/CppReader") {
+>()("effect-playground/BackendReader") {
 	static readonly layer = Layer.unwrap(
 		Effect.gen(function* () {
 			const port = yield* Config.option(
-				Config.Port("EFFECT_PLAYGROUND_CPP_PORT"),
+				Config.Port("EFFECT_PLAYGROUND_BACKEND_PORT"),
 			);
 			if (Option.isNone(port)) {
 				const missing = unavailable(
-					"the server runs without the C++ launcher (bun run dev starts both)",
+					"the BFF runs without the backend, which launches it (bun run dev starts both)",
 				);
-				return Layer.succeed(CppReader, {
+				return Layer.succeed(BackendReader, {
 					read: () => Effect.fail(missing),
 				});
 			}
-			return CppReader.connect(port.value);
+			return BackendReader.connect(port.value);
 		}),
 	);
 
 	static connect(port: number) {
 		const address = `127.0.0.1:${port}`;
 		return Layer.effect(
-			CppReader,
+			BackendReader,
 			Effect.gen(function* () {
-				const client = yield* RpcClient.make(ReaderProtocol);
+				const client = yield* RpcClient.make(BackendProtocol);
 				// A generator body, not an arrow: Effect.fn gives an arrow body the
 				// expected return type Effect<A, any, any>, and catchTag then infers
 				// its error type from that `any`.
-				const read = Effect.fn("CppReader.read")(function* (
+				const read = Effect.fn("BackendReader.read")(function* (
 					name: string,
 				) {
 					return yield* client.ReadFile({ name }).pipe(
@@ -71,7 +71,7 @@ export class CppReader extends Context.Service<
 						),
 					);
 				});
-				return CppReader.of({ read });
+				return BackendReader.of({ read });
 			}),
 		).pipe(
 			Layer.provide(RpcClient.layerProtocolSocket()),

@@ -1,22 +1,22 @@
 import { Effect, Layer } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
-import { FilesRpcs } from "../shared/rpc.ts";
-import { BunReader } from "./bun-reader.ts";
-import { CppReader } from "./cpp-reader.ts";
+import { BffRpcs } from "../shared/rpc.ts";
+import { BackendReader } from "./backend-reader.ts";
+import { BffReader } from "./bff-reader.ts";
 
-const FilesHandlers = FilesRpcs.toLayer(
+const BffRpcHandlers = BffRpcs.toLayer(
 	Effect.gen(function* () {
-		const bun = yield* BunReader;
-		const cpp = yield* CppReader;
-		return FilesRpcs.of({
-			ReadFileBun: ({ name }) => bun.read(name),
-			ReadFileCpp: ({ name }) => cpp.read(name),
+		const bff = yield* BffReader;
+		const backend = yield* BackendReader;
+		return BffRpcs.of({
+			ReadFileBff: ({ name }) => bff.read(name),
+			ReadFileBackend: ({ name }) => backend.read(name),
 		});
 	}),
 );
 
 export const RpcRoutes = RpcServer.layerHttp({
-	group: FilesRpcs,
+	group: BffRpcs,
 	path: "/rpc",
 	protocol: "http",
-}).pipe(Layer.provide([FilesHandlers, RpcSerialization.layerJson]));
+}).pipe(Layer.provide([BffRpcHandlers, RpcSerialization.layerJson]));

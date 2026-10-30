@@ -1,24 +1,24 @@
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import { ReadFile } from "../shared/generated/reader-protocol.ts";
+import { ReadFile } from "../shared/generated/backend-protocol.ts";
 
-// The Bun reader: the file system through Effect. Its C++ twin is
-// cpp/src/read_file.cpp.
-export class BunReader extends Context.Service<
-	BunReader,
+// The BFF's reader: the file system through Effect. Its twin in the backend
+// is cpp/src/read_file.cpp.
+export class BffReader extends Context.Service<
+	BffReader,
 	{
 		readonly read: (
 			name: string,
 		) => Effect.Effect<ReadFile.Success, ReadFile.Failure>;
 	}
->()("effect-playground/BunReader") {
+>()("effect-playground/BffReader") {
 	static readonly layer = Layer.effect(
-		BunReader,
+		BffReader,
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem;
 			const path = yield* Path.Path;
 			const directory = path.join(import.meta.dirname, "../../files");
 
-			const read = Effect.fn("BunReader.read")(function* (name: string) {
+			const read = Effect.fn("BffReader.read")(function* (name: string) {
 				if (path.extname(name) !== ".txt") {
 					return yield* new ReadFile.NotTxtFile({ file: name });
 				}
@@ -41,7 +41,7 @@ export class BunReader extends Context.Service<
 				return { contents };
 			});
 
-			return BunReader.of({ read });
+			return BffReader.of({ read });
 		}),
 	);
 }

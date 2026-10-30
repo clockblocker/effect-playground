@@ -2,10 +2,10 @@ import { Context, Effect, Layer, ManagedRuntime } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
-import { FilesApi } from "../shared/rest-api.ts";
-import { FilesRpcs } from "../shared/rpc.ts";
+import { BffApi } from "../shared/rest-api.ts";
+import { BffRpcs } from "../shared/rpc.ts";
 
-// Vite proxies /api and /rpc to the Bun server, so both clients talk to the
+// Vite proxies /api and /rpc to the BFF, so both clients talk to the
 // page's own origin.
 const origin = window.location.origin;
 
@@ -29,32 +29,34 @@ type Readers<Client> = {
 	};
 };
 
-// The REST client as files.bun.read(name) and files.cpp.read(name). A reader
-// added to the contract fails RestFiles.of below until it is wired up.
-export class RestFiles extends Context.Service<
-	RestFiles,
-	Readers<HttpApiClient.ForApi<typeof FilesApi>>
->()("effect-playground/RestFiles") {
+// The REST client as client.bff.read(name) and client.backend.read(name). A
+// reader added to the contract fails BffClient.of below until it is wired up.
+export class BffClient extends Context.Service<
+	BffClient,
+	Readers<HttpApiClient.ForApi<typeof BffApi>>
+>()("effect-playground/BffClient") {
 	static readonly layer = Layer.effect(
-		RestFiles,
-		Effect.map(HttpApiClient.make(FilesApi, { baseUrl: origin }), (files) =>
-			RestFiles.of({
-				bun: { read: (name) => files.bun.read({ params: { name } }) },
-				cpp: { read: (name) => files.cpp.read({ params: { name } }) },
+		BffClient,
+		Effect.map(HttpApiClient.make(BffApi, { baseUrl: origin }), (client) =>
+			BffClient.of({
+				bff: { read: (name) => client.bff.read({ params: { name } }) },
+				backend: {
+					read: (name) => client.backend.read({ params: { name } }),
+				},
 			}),
 		),
 	);
 }
 
-// A client derived from the RPC contract: client.ReadFileBun({ name }) and
-// client.ReadFileCpp({ name }).
-export class RpcFilesClient extends Context.Service<
-	RpcFilesClient,
-	RpcClient.FromGroup<typeof FilesRpcs, RpcClientError.RpcClientError>
->()("effect-playground/RpcFilesClient") {
+// A client derived from the RPC contract: client.ReadFileBff({ name }) and
+// client.ReadFileBackend({ name }).
+export class BffRpcClient extends Context.Service<
+	BffRpcClient,
+	RpcClient.FromGroup<typeof BffRpcs, RpcClientError.RpcClientError>
+>()("effect-playground/BffRpcClient") {
 	static readonly layer = Layer.effect(
-		RpcFilesClient,
-		RpcClient.make(FilesRpcs),
+		BffRpcClient,
+		RpcClient.make(BffRpcs),
 	).pipe(
 		Layer.provide(RpcClient.layerProtocolHttp({ url: `${origin}/rpc` })),
 		Layer.provide(RpcSerialization.layerJson),
@@ -63,7 +65,7 @@ export class RpcFilesClient extends Context.Service<
 
 // Builds both clients once and keeps them for the page's lifetime.
 export const runtime = ManagedRuntime.make(
-	Layer.mergeAll(RestFiles.layer, RpcFilesClient.layer).pipe(
+	Layer.mergeAll(BffClient.layer, BffRpcClient.layer).pipe(
 		Layer.provide(FetchHttpClient.layer),
 	),
 );

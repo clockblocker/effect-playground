@@ -5,8 +5,8 @@ import {
 	HttpApiGroup,
 	HttpApiSchema,
 } from "effect/http-api";
-import { ReadFile } from "./generated/reader-protocol.ts";
-import { ReaderUnavailable } from "./reader-unavailable.ts";
+import { BackendUnavailable } from "./backend-unavailable.ts";
+import { ReadFile } from "./generated/backend-protocol.ts";
 
 // HttpApiSchema.status keeps what a schema decodes to and from, but Effect
 // types the annotated schema by its internals (decodeTo<declareConstructor…>),
@@ -24,24 +24,24 @@ const withStatus =
 		self.pipe(HttpApiSchema.status(code));
 
 // One group per reader, each with a read endpoint, so the client reads
-// files.bun.read and files.cpp.read and each declares only its own errors:
-// GET /api/bun/files/read/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
-// GET /api/cpp/files/read/:name → the same, plus 503 ReaderUnavailable. The
-// statuses are attached here, because the errors are shared with RPC and the
-// C++ protocol, and only this transport reads them.
+// bff.read and backend.read and each declares only its own errors:
+// GET /api/bff/files/read/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
+// GET /api/backend/files/read/:name → the same, plus 503 BackendUnavailable.
+// The statuses are attached here, because the errors are shared with RPC and
+// the backend protocol, and only this transport reads them.
 const readFileErrors = [
 	ReadFile.NotTxtFile.pipe(withStatus(415)),
 	ReadFile.FileNotFound.pipe(withStatus(404)),
 ] as const;
 
-// The generated field, so a name the C++ protocol rejects (too short, too
+// The generated field, so a name the backend protocol rejects (too short, too
 // long) never reaches a handler: HttpApi answers 400 itself.
 const params = { name: ReadFile.Request.fields.name };
 const success = Schema.String.pipe(HttpApiSchema.asText());
 
-export class FilesApi extends HttpApi.make("files")
+export class BffApi extends HttpApi.make("bff")
 	.add(
-		HttpApiGroup.make("bun")
+		HttpApiGroup.make("bff")
 			.add(
 				HttpApiEndpoint.get("read", "/files/read/:name", {
 					params,
@@ -49,19 +49,19 @@ export class FilesApi extends HttpApi.make("files")
 					error: readFileErrors,
 				}),
 			)
-			.prefix("/api/bun"),
+			.prefix("/api/bff"),
 	)
 	.add(
-		HttpApiGroup.make("cpp")
+		HttpApiGroup.make("backend")
 			.add(
 				HttpApiEndpoint.get("read", "/files/read/:name", {
 					params,
 					success,
 					error: [
 						...readFileErrors,
-						ReaderUnavailable.pipe(withStatus(503)),
+						BackendUnavailable.pipe(withStatus(503)),
 					],
 				}),
 			)
-			.prefix("/api/cpp"),
+			.prefix("/api/backend"),
 	) {}

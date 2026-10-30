@@ -5,8 +5,8 @@ const root = join(import.meta.dir, "..");
 const source = join(root, "cpp");
 const build = join(source, "build");
 
-/** The launcher and C++ reader, once {@link buildCpp} has built it. */
-export const cppBinary = join(build, "effect-playground-cpp");
+/** The backend, which launches the BFF, once {@link buildCpp} has built it. */
+export const backendBinary = join(build, "effect-playground-backend");
 
 /**
  * Configures the CMake project on first use, then builds it incrementally.
@@ -17,7 +17,7 @@ export function buildCpp(): string {
 		run(["cmake", "-S", source, "-B", build, "-G", "Ninja"]);
 	}
 	run(["cmake", "--build", build]);
-	return cppBinary;
+	return backendBinary;
 }
 
 function run(command: string[]) {

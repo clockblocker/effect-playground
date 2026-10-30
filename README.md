@@ -7,8 +7,11 @@ over Effect RPC (`effect/rpc`). Files live in `files/`. A name that isn't
 A name must be 5 to 25 characters long. That rule lives on the C++ struct,
 and everything else gets it from the generated schema (see below).
 
-There are two readers: one in the Bun server, and one in C++ that the Bun
-server calls over JSON-RPC.
+Two processes take part. The **backend** is a C++ process; it serves
+JSON-RPC over TCP and launches the BFF. The **BFF** (backend-for-frontend)
+is a Bun server; it serves the page REST and RPC, and calls the backend over
+JSON-RPC. Each has its own reader, and the page's switch picks one: BFF or
+Backend.
 
 ## Prerequisites
 
@@ -25,45 +28,46 @@ bun run dev
 ```
 
 Open <http://127.0.0.1:5200/>. `bun run dev` builds `cpp/` if needed, then
-runs the C++ launcher next to Vite. The launcher opens the C++ reader on an
-ephemeral port on 127.0.0.1 (`EFFECT_PLAYGROUND_CPP_PORT` pins it), starts
+runs the backend next to Vite. The backend listens on an ephemeral port on
+127.0.0.1 (`EFFECT_PLAYGROUND_BACKEND_PORT` pins it), launches the BFF as
 `bun --watch src/server/main.ts` with that port in the same variable, and
-forwards Ctrl-C to it. The Bun server listens on 5201 and Vite proxies `/api`
-and `/rpc` to it. `EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT`
+forwards Ctrl-C to it. The BFF listens on 5201 and Vite proxies `/api` and
+`/rpc` to it. `EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT`
 move those.
 
-If the launcher dies some other way, even by SIGKILL or a crash, a watchdog
-process it forks at startup stops the Bun server within a second, `--watch`
-included (see `cpp/src/watchdog.hpp`). SIGINT or SIGTERM to the launcher stop
+If the backend dies some other way, even by SIGKILL or a crash, a watchdog
+process it forks at startup stops the BFF within a second, `--watch`
+included (see `cpp/src/watchdog.hpp`). SIGINT or SIGTERM to the backend stop
 everything too.
 
 Stop `bun run dev` with Ctrl-C, which signals every process in it. `bun run`
 doesn't forward SIGTERM to its children: `kill <pid of bun run dev>` leaves
-the launcher, the Bun server and Vite running.
+the backend, the BFF and Vite running.
 
-`bun run dev:server` runs the Bun server alone; there, the C++ endpoint and
-procedure fail with `ReaderUnavailable`, as they do when the C++ process dies.
+`bun run dev:server` runs the BFF alone; there, the backend endpoint and
+procedure fail with `BackendUnavailable`, as they do when the backend dies.
 
-Each reader has its own endpoint and procedure, so only the C++ ones declare
-`ReaderUnavailable`:
+Each reader has its own endpoint and procedure, so only the backend ones
+declare `BackendUnavailable`:
 
-- REST: `GET /api/bun/files/read/:name` and
-  `GET /api/cpp/files/read/:name`, called as `files.bun.read(…)` and
-  `files.cpp.read(…)`.
-- RPC: `ReadFileBun({ name })` and `ReadFileCpp({ name })`, both over
+- REST: `GET /api/bff/files/read/:name` and
+  `GET /api/backend/files/read/:name`, called as `client.bff.read(…)` and
+  `client.backend.read(…)`.
+- RPC: `ReadFileBff({ name })` and `ReadFileBackend({ name })`, both over
   `POST /rpc`.
 
-## The reader protocol
+## The backend protocol
 
-The C++ structs in `cpp/include/reader_protocol.hpp` define what crosses the
-wire between Bun and C++: the request, the success and the two errors.
+The C++ structs in `cpp/include/backend_protocol.hpp` define what crosses the
+wire between the BFF and the backend: the request, the success and the two
+errors.
 
 1. reflect-cpp turns them into JSON Schema:
-   `effect-playground-cpp --emit-schema` writes `cpp/protocol.schema.json`,
+   `effect-playground-backend --emit-schema` writes `cpp/protocol.schema.json`,
    adding each error's message template as `x-message`.
 2. `scripts/generate.ts` turns that into Effect Schema in one module,
-   `src/shared/generated/reader-protocol.ts`: a TypeScript namespace per
-   method, named after it, such as `ReadFile`, and the `ReaderProtocol` RPC
+   `src/shared/generated/backend-protocol.ts`: a TypeScript namespace per
+   method, named after it, such as `ReadFile`, and the `BackendProtocol` RPC
    group. `ReadFile.Request`, `ReadFile.Success` and `ReadFile.Failure` are
    the payload, the success and the error union (`Failure`, because an
    `Error` there would shadow the global one), and `ReadFile.NotTxtFile`
@@ -80,13 +84,13 @@ Each error's sentence lives on its C++ struct, as
 The generated class fills it in from its own fields in a `message` getter,
 so `error.message` and `String(error)` read
 `NotTxtFile: "config.json" is not a .txt file`, while the wire form stays
-`{"_tag":"NotTxtFile","file":"config.json"}`. The C++ reader fills in the same
+`{"_tag":"NotTxtFile","file":"config.json"}`. The backend fills in the same
 template for the `message` of its JSON-RPC error. The generator fails on an
 error without a template, on a `{field}` the struct doesn't have, and on a
 field named `name`, `message`, `stack` or `cause`, which would shadow the
-`Error`'s own. `ReaderUnavailable` is the Bun server's, so its sentence lives
-in `src/shared/reader-unavailable.ts`; the client's transport errors get their wording in
-the client.
+`Error`'s own. `BackendUnavailable` is the BFF's, so its sentence lives in
+`src/shared/backend-unavailable.ts`; the client's transport errors get their
+wording in the client.
 
 A field's reflect-cpp validators travel the same way. `ReadFileRequest::name`
 is an `rfl::Validator` with two `rfl::Size` bounds, so the schema carries
@@ -100,7 +104,7 @@ error for it. Each boundary rejects it:
   the REST client fails with a `SchemaError` before sending anything.
 - RPC: the client can't encode the payload and dies before sending. A raw
   request gets an `Exit` whose cause is a `Die` with the schema's message.
-- C++: reflect-cpp can't parse the params, and the reader answers with a `Die`.
+- The backend: reflect-cpp can't parse the params, and it answers with a `Die`.
 - The page: each panel's react-hook-form validates against the same field, so
   it shows the message under the input and never sends the request.
 
@@ -109,7 +113,7 @@ re-emits the schema and regenerates the TypeScript. Both outputs are
 committed. `bun run generate:check` fails if either is stale.
 
 The JSON-RPC dialect is Effect's `RpcSerialization.layerNdJsonRpc()`. The
-C++ side of it is documented in `cpp/src/json_rpc.hpp`.
+backend's side of it is documented in `cpp/src/json_rpc.hpp`.
 
 ## Checks
 
@@ -117,30 +121,32 @@ C++ side of it is documented in `cpp/src/json_rpc.hpp`.
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
-bun run test             # builds and spawns the C++ reader
+bun run test             # builds and spawns the backend
 bun run generate:check
 ```
 
-The C++ integration tests skip when `cmake` isn't on the PATH.
+The backend's integration tests skip when `cmake` isn't on the PATH.
 
 ## Layout
 
-- `cpp/` is the C++ launcher and reader. `cpp/build/` is ignored.
-- `src/shared/` is the contract both sides import: `ReaderUnavailable`, the
-  REST API, the RPC group, and the generated reader protocol.
-- `src/server/` holds `BunReader` and `CppReader`, and the two transports
-  mounted on one router; each handler calls the reader its endpoint names.
-- `src/client/` builds both clients, with one call per transport and reader
-  (`rest.bun`, `rpc.cpp`, …). Each returns the contents, failing with exactly
-  that call's errors. A panel runs one through `Effect.result` and renders
-  the `Result`; on failure it shows `describeFailure`, which is the error's
-  own `message` for the domain errors and the client's wording for transport
-  errors. `App` builds the form schema from the generated `ReadFile.Request`
-  plus `Reader`, and passes it to each panel, whose react-hook-form resolver
-  uses it.
+- `cpp/` is the backend, in C++. `cpp/build/` is ignored.
+- `src/shared/` is the contract the page and the BFF import:
+  `BackendUnavailable`, the REST API (`BffApi`), the RPC group (`BffRpcs`),
+  and the generated backend protocol.
+- `src/server/` is the BFF: `BffReader` and `BackendReader`, and the two
+  transports mounted on one router; each handler calls the reader its
+  endpoint names.
+- `src/client/` builds both clients, `BffClient` and `BffRpcClient`, with one
+  call per transport and reader (`rest.bff`, `rpc.backend`, …). Each returns
+  the contents, failing with exactly that call's errors. A panel runs one
+  through `Effect.result` and renders the `Result`; on failure it shows
+  `describeFailure`, which is the error's own `message` for the domain errors
+  and the client's wording for transport errors. `App` builds the form schema
+  from the generated `ReadFile.Request` plus `Reader`, and passes it to each
+  panel, whose react-hook-form resolver uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
   `bun run check` runs.
-- `scripts/` builds the C++ and runs the code generator.
+- `scripts/` builds the backend and runs the code generator.
 
 `@effect/platform-node-shared` is pinned to 4.0.0 only to match
 `effect` 4.0.0. Its 4.1 release imports modules that effect 4.0 lacks.

@@ -6,7 +6,7 @@
 #include <string_view>
 #include <type_traits>
 
-#include "reader_protocol.hpp"
+#include "backend_protocol.hpp"
 
 namespace protocol_schema {
 namespace {
@@ -22,7 +22,7 @@ Generic::Object& object(Generic& value, std::string_view what) {
 }
 
 // reflect-cpp's $defs key for an alternative of an rfl::TaggedUnion:
-// "reader_protocol::NotTxtFile" → "reader_protocol__NotTxtFile__tagged".
+// "backend_protocol::NotTxtFile" → "backend_protocol__NotTxtFile__tagged".
 template <class Error>
 std::string tagged_key() {
 	std::string key = rfl::type_name_t<Error>().str();
@@ -58,7 +58,7 @@ void add_messages(Generic::Object& defs,
 }  // namespace
 
 std::string emit() {
-	using reader_protocol::ReadFile;
+	using backend_protocol::ReadFile;
 	auto document =
 		rfl::json::read<Generic>(rfl::json::to_schema<ReadFile>()).value();
 	auto& defs = object(object(document, "the schema")["$defs"], "$defs");

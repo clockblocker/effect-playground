@@ -7,7 +7,7 @@
 
 namespace reader {
 
-using namespace reader_protocol;
+using namespace backend_protocol;
 
 ReadFileOutcome read_file(const std::filesystem::path& directory,
 						  const ReadFileRequest& request) {

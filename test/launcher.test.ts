@@ -16,7 +16,7 @@ test.skipIf(Bun.which("cmake") === null)(
 		const launcher = Bun.spawn(
 			[buildCpp(), "--", "sh", "-c", "echo $$; exec sleep 60"],
 			{
-				env: { ...process.env, EFFECT_PLAYGROUND_CPP_PORT: "" },
+				env: { ...process.env, EFFECT_PLAYGROUND_BACKEND_PORT: "" },
 				stdin: "ignore",
 				stdout: "pipe",
 				stderr: "ignore",

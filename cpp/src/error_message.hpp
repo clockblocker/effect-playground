@@ -5,10 +5,10 @@
 #include <string>
 #include <string_view>
 
-// An error's message template (see reader_protocol.hpp), filled in.
+// An error's message template (see backend_protocol.hpp), filled in.
 namespace error_message {
 
-// "reader_protocol::NotTxtFile" → "NotTxtFile".
+// "backend_protocol::NotTxtFile" → "NotTxtFile".
 template <class T>
 std::string unqualified_name() {
 	const std::string name = rfl::type_name_t<T>().str();

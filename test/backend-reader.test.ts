@@ -2,37 +2,37 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Subprocess } from "bun";
 import { Effect } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
-import { CppReader } from "../src/server/cpp-reader.ts";
-import { ReadFile } from "../src/shared/generated/reader-protocol.ts";
+import { BackendReader } from "../src/server/backend-reader.ts";
+import { ReadFile } from "../src/shared/generated/backend-protocol.ts";
 
 const files = new URL("../files", import.meta.url).pathname;
 
-let reader: Subprocess<"ignore", "ignore", "pipe"> | undefined;
+let backend: Subprocess<"ignore", "ignore", "pipe"> | undefined;
 let port = 0;
 
 const read = (name: string) =>
 	Effect.runPromise(
 		Effect.gen(function* () {
-			const cpp = yield* CppReader;
-			return yield* cpp.read(name);
-		}).pipe(Effect.result, Effect.provide(CppReader.connect(port))),
+			const reader = yield* BackendReader;
+			return yield* reader.read(name);
+		}).pipe(Effect.result, Effect.provide(BackendReader.connect(port))),
 	);
 
-describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
+describe.skipIf(Bun.which("cmake") === null)("backend", () => {
 	// Builds the C++ project (the first build fetches reflect-cpp) and starts the
-	// reader without a child command, so it only serves.
+	// backend without a child command, so it only serves.
 	beforeAll(async () => {
 		const binary = buildCpp();
-		reader = Bun.spawn([binary, "--files", files], {
-			env: { ...process.env, EFFECT_PLAYGROUND_CPP_PORT: "" },
+		backend = Bun.spawn([binary, "--files", files], {
+			env: { ...process.env, EFFECT_PLAYGROUND_BACKEND_PORT: "" },
 			stdin: "ignore",
 			stdout: "ignore",
 			stderr: "pipe",
 		});
-		port = await listeningPort(reader.stderr);
+		port = await listeningPort(backend.stderr);
 	}, 600_000);
 
-	afterAll(() => reader?.kill("SIGTERM"));
+	afterAll(() => backend?.kill("SIGTERM"));
 
 	test("answers Effect's JSON-RPC dialect, one frame per line", async () => {
 		const frames = [
@@ -144,9 +144,9 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 	});
 });
 
-describe("C++ reader bridge", () => {
-	test("sends a request frame the C++ side can answer", async () => {
-		// A stand-in for the C++ reader that records what Effect sends.
+describe("BackendReader", () => {
+	test("sends a request frame the backend can answer", async () => {
+		// A stand-in for the backend that records what Effect sends.
 		const received: unknown[] = [];
 		const server = Bun.listen({
 			hostname: "127.0.0.1",
@@ -168,8 +168,8 @@ describe("C++ reader bridge", () => {
 		});
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* (yield* CppReader).read("hello.txt");
-			}).pipe(Effect.provide(CppReader.connect(server.port))),
+				return yield* (yield* BackendReader).read("hello.txt");
+			}).pipe(Effect.provide(BackendReader.connect(server.port))),
 		);
 		server.stop(true);
 		expect(result).toEqual({ contents: "stub" });
@@ -183,7 +183,7 @@ describe("C++ reader bridge", () => {
 		]);
 	});
 
-	test("an unreachable reader fails with ReaderUnavailable", async () => {
+	test("an unreachable backend fails with BackendUnavailable", async () => {
 		const closed = Bun.listen({
 			hostname: "127.0.0.1",
 			port: 0,
@@ -193,10 +193,13 @@ describe("C++ reader bridge", () => {
 		closed.stop(true);
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* (yield* CppReader).read("hello.txt");
-			}).pipe(Effect.flip, Effect.provide(CppReader.connect(unusedPort))),
+				return yield* (yield* BackendReader).read("hello.txt");
+			}).pipe(
+				Effect.flip,
+				Effect.provide(BackendReader.connect(unusedPort)),
+			),
 		);
-		expect(result._tag).toBe("ReaderUnavailable");
+		expect(result._tag).toBe("BackendUnavailable");
 	});
 });
 
@@ -242,5 +245,5 @@ async function listeningPort(stderr: ReadableStream<Uint8Array>) {
 		const match = /127\.0\.0\.1:(\d+)/.exec(output);
 		if (match?.[1] !== undefined) return Number(match[1]);
 	}
-	throw new Error(`The C++ reader exited: ${output}`);
+	throw new Error(`The backend exited: ${output}`);
 }

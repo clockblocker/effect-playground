@@ -8,7 +8,7 @@ import {
 
 /**
  * Writes the Effect Schema module for a normalized protocol: one file named
- * after the C++ namespace, such as `reader-protocol.ts`.
+ * after the C++ namespace, such as `backend-protocol.ts`.
  *
  * Each procedure gets a TypeScript namespace of its own name, the one its RPC
  * is made with. In it, its payload is `Request`, its success `Success` and
@@ -62,7 +62,7 @@ export function emit(
 		'import { Rpc, RpcGroup } from "effect/rpc";',
 		"",
 		...namespaces,
-		`/** The C++ reader's procedures, for an Effect RPC client over JSON-RPC. */`,
+		`/** The backend's procedures, for an Effect RPC client over JSON-RPC. */`,
 		`export class ${group} extends RpcGroup.make(`,
 		...procedures.map(({ name }) =>
 			[
@@ -390,7 +390,7 @@ function wrap(text: string, width: number): string[] {
 	return [...lines, line];
 }
 
-/** `ReaderProtocol` → `reader-protocol`. */
+/** `BackendProtocol` → `backend-protocol`. */
 function kebabCase(identifier: string): string {
 	return identifier.replaceAll(/(?<=.)([A-Z])/g, "-$1").toLowerCase();
 }

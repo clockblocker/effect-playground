@@ -1,11 +1,11 @@
 #pragma once
 
-// The reader protocol: the single source of truth for what crosses the wire
-// between the Bun server and this C++ reader.
+// The backend protocol: the single source of truth for what crosses the wire
+// between the BFF and this backend.
 //
 // To change it, edit the structs below and run `bun run generate`. That
 // rebuilds this project, writes `cpp/protocol.schema.json` and regenerates
-// `src/shared/generated/reader-protocol.ts`, where every struct becomes an
+// `src/shared/generated/backend-protocol.ts`, where every struct becomes an
 // Effect Schema. A procedure gets a TypeScript namespace of its own name:
 // `ReadFile.Request`, `ReadFile.Success` and `ReadFile.Failure` are its
 // payload, success and error union, and every other struct it uses keeps its
@@ -22,7 +22,7 @@
 //   reads when it happens, with `{field}` standing for that field's value. A
 //   static member isn't a field, so it never crosses the wire: the schema
 //   carries it as `x-message`, and the generated class gets a `message`
-//   getter that fills it in. This reader fills it in for the message of its
+//   getter that fills it in. The backend fills it in for the message of its
 //   JSON-RPC error. The generator fails on an error without one, or on a
 //   `{field}` the struct doesn't have.
 
@@ -31,7 +31,7 @@
 #include <string>
 #include <string_view>
 
-namespace reader_protocol {
+namespace backend_protocol {
 
 struct ReadFileRequest {
 	rfl::Description<
@@ -71,4 +71,4 @@ struct ReadFile {
 	ReadFileError error;
 };
 
-}  // namespace reader_protocol
+}  // namespace backend_protocol

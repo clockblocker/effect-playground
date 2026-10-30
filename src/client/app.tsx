@@ -2,9 +2,9 @@ import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { Effect, Result, Schema } from "effect";
 import { useId, useMemo, useState } from "react";
 import { type UseFormRegisterReturn, useForm } from "react-hook-form";
-import { ReadFile } from "../shared/generated/reader-protocol.ts";
+import { ReadFile } from "../shared/generated/backend-protocol.ts";
 import { Reader } from "../shared/reader.ts";
-import type { RestFiles, RpcFilesClient } from "./clients.ts";
+import type { BffClient, BffRpcClient } from "./clients.ts";
 import { runtime } from "./clients.ts";
 import { describeFailure, type ReadFailure, rest, rpc } from "./read-file.ts";
 
@@ -38,7 +38,7 @@ function ReaderPanel({
 		Reader,
 		(
 			name: string,
-		) => Effect.Effect<string, ReadFailure, RestFiles | RpcFilesClient>
+		) => Effect.Effect<string, ReadFailure, BffClient | BffRpcClient>
 	>;
 }) {
 	// The types come from the schema, spelled out because inference through
@@ -60,7 +60,7 @@ function ReaderPanel({
 		resolver,
 		defaultValues: {
 			name: "hello.txt",
-			reader: "bun",
+			reader: "bff",
 		} satisfies ReadFileForm["Encoded"],
 	});
 	const [result, setResult] = useState<Result.Result<
@@ -108,8 +108,11 @@ function ReaderPanel({
 	);
 }
 
-const readerOrder: readonly Reader[] = ["bun", "cpp"];
-const readerLabels: Record<Reader, string> = { bun: "Bun", cpp: "C++" };
+const readerOrder: readonly Reader[] = ["bff", "backend"];
+const readerLabels: Record<Reader, string> = {
+	bff: "BFF",
+	backend: "Backend",
+};
 
 function ReaderSwitch({ field }: { field: UseFormRegisterReturn<"reader"> }) {
 	// Radios group by form and name, so each panel's "reader" is its own group.

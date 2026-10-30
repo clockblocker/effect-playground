@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { emit } from "../scripts/reader-protocol/emit.ts";
-import { normalize } from "../scripts/reader-protocol/normalize.ts";
-import { ReadFile } from "../src/shared/generated/reader-protocol.ts";
+import { emit } from "../scripts/backend-protocol/emit.ts";
+import { normalize } from "../scripts/backend-protocol/normalize.ts";
+import { ReadFile } from "../src/shared/generated/backend-protocol.ts";
 
-// The payloads the C++ reader puts on the wire.
+// The payloads the backend puts on the wire.
 const wire = {
 	request: { name: "hello.txt" },
 	success: { contents: "Hello\n" },
@@ -12,7 +12,7 @@ const wire = {
 	fileNotFound: { _tag: "FileNotFound", file: "missing.txt" },
 } as const;
 
-describe("generated reader protocol", () => {
+describe("generated backend protocol", () => {
 	test("structs decode and encode their wire form", () => {
 		expect(
 			Schema.decodeUnknownSync(ReadFile.Request)(wire.request),

@@ -21,7 +21,7 @@ namespace {
 	throw std::system_error(errno, std::generic_category(), what);
 }
 
-// The launcher spawns Bun, which must not inherit these sockets.
+// The backend launches the BFF, which must not inherit these sockets.
 void close_on_exec(int fd) { fcntl(fd, F_SETFD, FD_CLOEXEC); }
 
 bool write_all(int fd, std::string_view data) {

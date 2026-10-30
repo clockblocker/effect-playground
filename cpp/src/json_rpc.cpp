@@ -6,12 +6,12 @@
 
 #include "error_message.hpp"
 #include "read_file.hpp"
-#include "reader_protocol.hpp"
+#include "backend_protocol.hpp"
 
 namespace json_rpc {
 namespace {
 
-using namespace reader_protocol;
+using namespace backend_protocol;
 
 // The envelopes, as reflect-cpp structs: field order is wire order.
 

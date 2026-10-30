@@ -1,5 +1,5 @@
 import { Schema } from "effect";
 
-/** Which implementation reads the file: the Bun server or the C++ reader. */
-export const Reader = Schema.Literals(["bun", "cpp"]);
+/** Which implementation reads the file: the BFF or the backend. */
+export const Reader = Schema.Literals(["bff", "backend"]);
 export type Reader = typeof Reader.Type;

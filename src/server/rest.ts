@@ -1,31 +1,33 @@
 import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
-import { FilesApi } from "../shared/rest-api.ts";
-import { BunReader } from "./bun-reader.ts";
-import { CppReader } from "./cpp-reader.ts";
+import { BffApi } from "../shared/rest-api.ts";
+import { BackendReader } from "./backend-reader.ts";
+import { BffReader } from "./bff-reader.ts";
 
-const BunHandlers = HttpApiBuilder.group(
-	FilesApi,
-	"bun",
+const BffHandlers = HttpApiBuilder.group(
+	BffApi,
+	"bff",
 	Effect.fn(function* (handlers) {
-		const bun = yield* BunReader;
+		const bff = yield* BffReader;
 		return handlers.handle("read", ({ params }) =>
-			bun.read(params.name).pipe(Effect.map(({ contents }) => contents)),
+			bff.read(params.name).pipe(Effect.map(({ contents }) => contents)),
 		);
 	}),
 );
 
-const CppHandlers = HttpApiBuilder.group(
-	FilesApi,
-	"cpp",
+const BackendHandlers = HttpApiBuilder.group(
+	BffApi,
+	"backend",
 	Effect.fn(function* (handlers) {
-		const cpp = yield* CppReader;
+		const backend = yield* BackendReader;
 		return handlers.handle("read", ({ params }) =>
-			cpp.read(params.name).pipe(Effect.map(({ contents }) => contents)),
+			backend
+				.read(params.name)
+				.pipe(Effect.map(({ contents }) => contents)),
 		);
 	}),
 );
 
-export const RestRoutes = HttpApiBuilder.layer(FilesApi).pipe(
-	Layer.provide([BunHandlers, CppHandlers]),
+export const RestRoutes = HttpApiBuilder.layer(BffApi).pipe(
+	Layer.provide([BffHandlers, BackendHandlers]),
 );

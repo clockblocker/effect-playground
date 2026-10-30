@@ -1,8 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$ref": "#/$defs/reader_protocol__ReadFile",
+    "$ref": "#/$defs/backend_protocol__ReadFile",
     "$defs": {
-        "reader_protocol__FileNotFound__tagged": {
+        "backend_protocol__FileNotFound__tagged": {
             "type": "object",
             "x-message": "\"{file}\" does not exist",
             "properties": {
@@ -22,7 +22,7 @@
                 "file"
             ]
         },
-        "reader_protocol__NotTxtFile__tagged": {
+        "backend_protocol__NotTxtFile__tagged": {
             "type": "object",
             "x-message": "\"{file}\" is not a .txt file",
             "properties": {
@@ -42,22 +42,22 @@
                 "file"
             ]
         },
-        "reader_protocol__ReadFile": {
+        "backend_protocol__ReadFile": {
             "type": "object",
             "properties": {
                 "payload": {
-                    "$ref": "#/$defs/reader_protocol__ReadFileRequest"
+                    "$ref": "#/$defs/backend_protocol__ReadFileRequest"
                 },
                 "success": {
-                    "$ref": "#/$defs/reader_protocol__ReadFileSuccess"
+                    "$ref": "#/$defs/backend_protocol__ReadFileSuccess"
                 },
                 "error": {
                     "anyOf": [
                         {
-                            "$ref": "#/$defs/reader_protocol__NotTxtFile__tagged"
+                            "$ref": "#/$defs/backend_protocol__NotTxtFile__tagged"
                         },
                         {
-                            "$ref": "#/$defs/reader_protocol__FileNotFound__tagged"
+                            "$ref": "#/$defs/backend_protocol__FileNotFound__tagged"
                         }
                     ]
                 }
@@ -68,7 +68,7 @@
                 "error"
             ]
         },
-        "reader_protocol__ReadFileRequest": {
+        "backend_protocol__ReadFileRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -89,7 +89,7 @@
                 "name"
             ]
         },
-        "reader_protocol__ReadFileSuccess": {
+        "backend_protocol__ReadFileSuccess": {
             "type": "object",
             "properties": {
                 "contents": {
