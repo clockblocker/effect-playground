@@ -7,15 +7,13 @@ import {
 } from "./normalize.ts";
 
 /**
- * Writes the Effect Schema modules for a normalized protocol, as file name →
- * source: one module per procedure, such as `read-file.ts`, and an index named
- * after the namespace, such as `reader-protocol.ts`.
+ * Writes the Effect Schema module for a normalized protocol: one file named
+ * after the C++ namespace, such as `reader-protocol.ts`.
  *
- * A procedure's module exports its payload, success and error union under the
- * short names `Request`, `Success` and `Error`, and every other definition it
- * uses, such as its error classes, under their own. The index re-exports each
- * module as a namespace named after its procedure, so `ReadFile.` lists all of
- * them, and declares the RPC group.
+ * Each procedure gets a TypeScript namespace of its own name, the one its RPC
+ * is made with. In it, its payload is `Request`, its success `Success` and
+ * its error union `Failure`, and every other definition it uses, such as its
+ * error classes, keeps its own name. After the namespaces comes the RPC group.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -25,14 +23,19 @@ import {
 export function emit(
 	protocol: Protocol,
 	header: readonly string[],
-): ReadonlyMap<string, string> {
+): { readonly file: string; readonly source: string } {
 	const { namespace, procedures, definitions } = protocol;
 	const group = pascalCase(namespace || "Protocol");
-	const comment = header.map((line) => `// ${line}`);
 
-	// A definition lives in the module of the one procedure that uses it.
+	// A definition lives in the namespace of the one procedure that uses it.
 	const owners = new Map<string, string>();
-	const modules = procedures.map((procedure) => {
+	const namespaces = procedures.map((procedure) => {
+		if (procedure.name === group) {
+			throw new Error(
+				`${procedure.name} would clash with the RPC group ${group}; ` +
+					"rename the procedure or the C++ namespace",
+			);
+		}
 		const names = dependencyOrder(
 			[procedure.payload, procedure.success, ...procedure.errors],
 			definitions,
@@ -47,121 +50,124 @@ export function emit(
 			}
 			owners.set(name, procedure.name);
 		}
-		return {
-			procedure,
-			file: `${kebabCase(procedure.name)}.ts`,
-			source: procedureModule(procedure, names, definitions, comment),
-		};
+		return procedureNamespace(procedure, names, definitions);
 	});
 
-	const index = [
-		...comment,
+	const source = [
+		...header.map((line) => `// ${line}`),
+		"//",
+		...namespaceNote.map((line) => `// ${line}`),
 		"",
+		'import { Schema } from "effect";',
 		'import { Rpc, RpcGroup } from "effect/rpc";',
-		...modules.map(
-			({ procedure, file }) =>
-				`import * as ${procedure.name} from "./${file}";`,
-		),
 		"",
-		`export { ${modules.map(({ procedure }) => procedure.name).join(", ")} };`,
-		"",
+		...namespaces,
 		`/** The C++ reader's procedures, for an Effect RPC client over JSON-RPC. */`,
 		`export class ${group} extends RpcGroup.make(`,
-		...modules.map(({ procedure: { name } }) =>
+		...procedures.map(({ name }) =>
 			[
 				`Rpc.make(${JSON.stringify(name)}, {`,
 				`payload: ${name}.Request,`,
 				`success: ${name}.Success,`,
-				`error: ${name}.Error,`,
+				`error: ${name}.Failure,`,
 				"}),",
 			].join("\n"),
 		),
 		") {}",
 		"",
 	].join("\n");
-
-	const files = new Map<string, string>();
-	for (const [file, source] of [
-		...modules.map(({ file, source }) => [file, source] as const),
-		[`${kebabCase(group)}.ts`, index] as const,
-	]) {
-		if (files.has(file)) throw new Error(`Two modules are both ${file}`);
-		files.set(file, source);
-	}
-	return files;
+	return { file: `${kebabCase(group)}.ts`, source };
 }
 
-const shortNames = ["Request", "Success", "Error"] as const;
+const namespaceNote = [
+	"A namespace per method makes `ReadFile.Success` both the schema and its",
+	"type, and TypeScript 7 hovers read `ReadFile.Success`. Namespaces are",
+	"TypeScript-only syntax that emits code, which Bun and Vite both compile.",
+];
 
-function procedureModule(
+/** The names a procedure's namespace gives its payload, success and errors. */
+const roleNames = ["Request", "Success", "Failure"] as const;
+
+function procedureNamespace(
 	procedure: Procedure,
 	names: readonly string[],
 	definitions: ReadonlyMap<string, Definition>,
-	comment: readonly string[],
 ): string {
-	const errorUnion = `${procedure.name}Error`;
-	for (const name of [...names, errorUnion]) {
-		if ((shortNames as readonly string[]).includes(name)) {
+	const { payload, success } = procedure;
+	for (const name of names) {
+		if (
+			name !== payload &&
+			name !== success &&
+			(roleNames as readonly string[]).includes(name)
+		) {
 			throw new Error(
 				`${name} would clash with ${procedure.name}.${name}; rename the struct`,
 			);
 		}
+		// The engine refers to a struct by its C++ name, which the namespace
+		// doesn't declare for the payload and success.
+		for (const ref of refsOf(required(definitions, name))) {
+			if (ref === payload || ref === success) {
+				throw new Error(
+					`${name} refers to ${ref}, which ${procedure.name} declares ` +
+						`as ${ref === payload ? "Request" : "Success"}; the ` +
+						"generator can't refer to it by that name yet",
+				);
+			}
+		}
 	}
-	if (names.includes(errorUnion)) {
-		throw new Error(
-			`${errorUnion} would clash with ${procedure.name}'s error union; ` +
-				"rename the struct",
-		);
+	const roles = new Map<string, readonly [string, string]>([
+		[payload, ["Request", `What ${procedure.name} takes.`]],
+	]);
+	if (success !== payload) {
+		roles.set(success, [
+			"Success",
+			`What ${procedure.name} succeeds with.`,
+		]);
 	}
-	// Declared under the full name and exported under the short one, so a
-	// hover says ReadFileSuccess, which still reads right beside other
-	// procedures, rather than Success.
-	const aliases: ReadonlyArray<readonly [string, string, string]> = [
-		[procedure.payload, "Request", `What ${procedure.name} takes.`],
-		[procedure.success, "Success", `What ${procedure.name} succeeds with.`],
-	];
-	const aliased = new Map(aliases.map(([name, , doc]) => [name, doc]));
 	const declarations = names.map((name) =>
-		declare(required(definitions, name), definitions, aliased.get(name)),
+		declare(required(definitions, name), definitions, roles.get(name)),
 	);
-	const exports = [
-		...aliases.map(([name, short]) => `${name} as ${short}`),
-		`${errorUnion} as Error`,
-	];
+	const sameStruct =
+		success === payload
+			? [
+					`/** What ${procedure.name} succeeds with, the same struct it takes. */`,
+					"export const Success = Request;",
+					"export interface Success extends Request {}",
+					"",
+				]
+			: [];
 
 	return [
-		...comment,
-		"",
-		'import { Schema } from "effect";',
-		"",
+		`/** What the ${procedure.name} method takes, succeeds with and fails with. */`,
+		`export namespace ${procedure.name} {`,
 		...declarations,
+		...sameStruct,
 		`/** Every error ${procedure.name} can fail with. */`,
-		`const ${errorUnion} = Schema.Union([${procedure.errors.join(", ")}]);`,
-		`type ${errorUnion} = typeof ${errorUnion}.Type;`,
-		"",
-		"// Declared under their full names and exported under short ones, so",
-		`// hovers say ${procedure.success} rather than Success.`,
-		`export { ${exports.join(", ")} };`,
+		`export const Failure = Schema.Union([${procedure.errors.join(", ")}]);`,
+		"export type Failure = typeof Failure.Type;",
+		"}",
 		"",
 	].join("\n");
 }
 
 /**
- * Declares a definition: exported under its own name, or, when `aliasDoc` is
- * set, not exported here, because the module exports it under a short name.
+ * Declares a definition under its own name, or, when `role` is set, under
+ * the name its procedure's namespace gives it, such as `Request`, with JSDoc.
  */
 function declare(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
-	aliasDoc?: string,
+	role?: readonly [name: string, doc: string],
 ): string {
-	const { name, tag } = definition;
+	const { tag } = definition;
 	const fields = fieldsOf(definition, definitions);
 	if (tag !== undefined) {
+		const { name } = definition;
 		if (definition.message === undefined) {
 			throw new Error(`${name} is tagged but has no message template`);
 		}
-		if (aliasDoc !== undefined) {
+		if (role !== undefined) {
 			throw new Error(
 				`${name} is an error, so it can't be a payload or success`,
 			);
@@ -179,15 +185,15 @@ function declare(
 			"",
 		].join("\n");
 	}
-	const exported = aliasDoc === undefined ? "export " : "";
+	const [name, doc] = role ?? [definition.name];
 	return [
-		...(aliasDoc === undefined ? [] : [`/** ${aliasDoc} */`]),
-		`${exported}const ${name} = Schema.Struct({`,
+		...(doc === undefined ? [] : [`/** ${doc} */`]),
+		`export const ${name} = Schema.Struct({`,
 		...fields,
 		"});",
 		// An interface, not a type alias, so hovers say the name instead of
 		// expanding the struct.
-		`${exported}interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
+		`export interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
 		"",
 	].join("\n");
 }
@@ -340,14 +346,18 @@ function dependencyOrder(
 	const ordered: string[] = [];
 	const visit = (name: string) => {
 		if (ordered.includes(name)) return;
-		const refs = JSON.stringify(
-			required(definitions, name).schema,
-		).matchAll(/"#\/\$defs\/([^"]+)"/g);
-		for (const [, ref] of refs) if (ref !== undefined) visit(ref);
+		for (const ref of refsOf(required(definitions, name))) visit(ref);
 		ordered.push(name);
 	};
 	for (const root of roots) visit(root);
 	return ordered;
+}
+
+/** The definitions a definition's schema refers to, by name. */
+function refsOf(definition: Definition): string[] {
+	return [
+		...JSON.stringify(definition.schema).matchAll(/"#\/\$defs\/([^"]+)"/g),
+	].flatMap(([, ref]) => (ref === undefined ? [] : [ref]));
 }
 
 function required(
@@ -380,7 +390,7 @@ function wrap(text: string, width: number): string[] {
 	return [...lines, line];
 }
 
-/** `ReadFile` → `read-file`. */
+/** `ReaderProtocol` → `reader-protocol`. */
 function kebabCase(identifier: string): string {
 	return identifier.replaceAll(/(?<=.)([A-Z])/g, "-$1").toLowerCase();
 }

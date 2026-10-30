@@ -10,11 +10,11 @@ export class FilesRpcs extends RpcGroup.make(
 	Rpc.make("ReadFileBun", {
 		payload: ReadFile.Request,
 		success: ReadFile.Success,
-		error: ReadFile.Error,
+		error: ReadFile.Failure,
 	}),
 	Rpc.make("ReadFileCpp", {
 		payload: ReadFile.Request,
 		success: ReadFile.Success,
-		error: Schema.Union([ReadFile.Error, ReaderUnavailable]),
+		error: Schema.Union([ReadFile.Failure, ReaderUnavailable]),
 	}),
 ) {}

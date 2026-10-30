@@ -5,11 +5,11 @@
 //
 // To change it, edit the structs below and run `bun run generate`. That
 // rebuilds this project, writes `cpp/protocol.schema.json` and regenerates
-// `src/shared/generated/`, where every struct becomes an Effect Schema. A
-// procedure gets its own module, which `reader-protocol.ts` exports as a
-// namespace of the procedure's name: `ReadFile.Request`, `ReadFile.Success`
-// and `ReadFile.Error` are its payload, success and error union, and every
-// other struct it uses keeps its name, as in `ReadFile.NotTxtFile`.
+// `src/shared/generated/reader-protocol.ts`, where every struct becomes an
+// Effect Schema. A procedure gets a TypeScript namespace of its own name:
+// `ReadFile.Request`, `ReadFile.Success` and `ReadFile.Failure` are its
+// payload, success and error union, and every other struct it uses keeps its
+// name, as in `ReadFile.NotTxtFile`.
 //
 // - A field's `rfl::Description` becomes the JSDoc on the TS field.
 // - A string's `rfl::Size` bounds become `minLength` / `maxLength`, then

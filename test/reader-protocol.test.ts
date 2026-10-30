@@ -37,12 +37,12 @@ describe("generated reader protocol", () => {
 	});
 
 	test("errors decode into the TaggedError classes and encode back", () => {
-		const decode = Schema.decodeUnknownSync(ReadFile.Error);
+		const decode = Schema.decodeUnknownSync(ReadFile.Failure);
 		const notTxt = decode(wire.notTxtFile);
 		expect(notTxt).toBeInstanceOf(ReadFile.NotTxtFile);
 		expect(notTxt.file).toBe("config.json");
 		expect(decode(wire.fileNotFound)).toBeInstanceOf(ReadFile.FileNotFound);
-		expect(Schema.encodeSync(ReadFile.Error)(notTxt)).toEqual(
+		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
 		expect(() => decode({ _tag: "Elsewhere", file: "x" })).toThrow();
@@ -57,10 +57,10 @@ describe("generated reader protocol", () => {
 		expect(new ReadFile.FileNotFound({ file: "missing.txt" }).message).toBe(
 			'"missing.txt" does not exist',
 		);
-		expect(Schema.encodeSync(ReadFile.Error)(notTxt)).toEqual(
+		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
-		const decoded = Schema.decodeUnknownSync(ReadFile.Error)(
+		const decoded = Schema.decodeUnknownSync(ReadFile.Failure)(
 			wire.fileNotFound,
 		);
 		expect(decoded.message).toBe('"missing.txt" does not exist');
@@ -118,9 +118,9 @@ describe("emitter", () => {
 		},
 	};
 
-	/** Every module the emitter writes, in one string. */
+	/** The module the emitter writes. */
 	const emitted = (document: unknown) =>
-		[...emit(normalize(document), ["header"]).values()].join("\n");
+		emit(normalize(document), ["header"]).source;
 
 	test("undoes namespaces, wrappers and optionals", () => {
 		const source = emitted(schema);
@@ -133,22 +133,122 @@ describe("emitter", () => {
 		expect(source).not.toContain("__");
 	});
 
-	test("writes a module per method, exported as its namespace", () => {
-		const modules = emit(normalize(schema), ["header"]);
-		expect([...modules.keys()]).toEqual(["get.ts", "a-b.ts"]);
-		const get = modules.get("get.ts") ?? "";
-		// Full names for hovers, short names for consumers.
-		expect(get).toContain("const Query = Schema.Struct({");
-		expect(get).toContain("interface Query extends");
-		expect(get).toContain("const GetError = Schema.Union([Gone]);");
-		expect(get).toContain(
-			"export { Query as Request, Query as Success, GetError as Error };",
+	test("writes one module, with a namespace per method", () => {
+		const { file, source } = emit(normalize(schema), ["header"]);
+		expect(file).toBe("a-b.ts");
+		expect(source).toStartWith("// header\n");
+		expect(source).toContain("export namespace Get {");
+		// The payload is declared as Request, schema and type under one name.
+		expect(source).toContain("export const Request = Schema.Struct({");
+		expect(source).toContain(
+			"export interface Request extends Schema.Schema.Type<typeof Request> {}",
 		);
-		const index = modules.get("a-b.ts") ?? "";
-		expect(index).toContain('import * as Get from "./get.ts";');
-		expect(index).toContain("export { Get };");
-		expect(index).toContain(
-			"payload: Get.Request,\nsuccess: Get.Success,\nerror: Get.Error,",
+		// Query is the payload and the success too.
+		expect(source).toContain("export const Success = Request;");
+		expect(source).toContain(
+			"export const Failure = Schema.Union([Gone]);\nexport type Failure = typeof Failure.Type;",
+		);
+		expect(source).toContain(
+			'Rpc.make("Get", {\npayload: Get.Request,\nsuccess: Get.Success,\nerror: Get.Failure,',
+		);
+		// No aliases, and no C++ name for a struct the namespace renames.
+		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
+		expect(source).not.toContain("Query");
+	});
+
+	test("puts each method's errors in its own namespace", () => {
+		const get = normalize(schema);
+		const put = normalize({
+			$ref: "#/$defs/a__b__Put",
+			$defs: {
+				a__b__Put: {
+					type: "object",
+					properties: {
+						payload: { $ref: "#/$defs/a__b__Item" },
+						success: { $ref: "#/$defs/a__b__Stored" },
+						error: { $ref: "#/$defs/a__b__Full__tagged" },
+					},
+					required: ["payload", "success", "error"],
+				},
+				a__b__Item: {
+					type: "object",
+					properties: { body: { type: "string" } },
+					required: ["body"],
+				},
+				a__b__Stored: {
+					type: "object",
+					properties: { id: { type: "integer" } },
+					required: ["id"],
+				},
+				a__b__Full__tagged: {
+					type: "object",
+					"x-message": "no room for more",
+					properties: { _tag: { type: "string", enum: ["Full"] } },
+					required: ["_tag"],
+				},
+			},
+		});
+		const { source } = emit(
+			{
+				...get,
+				procedures: [...get.procedures, ...put.procedures],
+				definitions: new Map([...get.definitions, ...put.definitions]),
+			},
+			["header"],
+		);
+		// From a namespace to the next one or to the RPC group.
+		const block = (name: string) => {
+			const start = source.indexOf(`export namespace ${name} {`);
+			const end = source
+				.slice(start + 1)
+				.search(/^export (namespace|class \w+ extends RpcGroup)/m);
+			return source.slice(start, start + 1 + end);
+		};
+		expect(block("Get")).toContain("export class Gone extends");
+		expect(block("Get")).not.toContain("Full");
+		expect(block("Put")).toContain("export class Full extends");
+		expect(block("Put")).toContain(
+			"export const Success = Schema.Struct({",
+		);
+		expect(block("Put")).toContain(
+			"export const Failure = Schema.Union([Full]);",
+		);
+		expect(source).toContain("error: Get.Failure,");
+		expect(source).toContain("error: Put.Failure,");
+	});
+
+	test("fails on a struct named after a namespace member", () => {
+		const clashing = structuredClone(schema) as {
+			$defs: Record<string, Record<string, unknown>>;
+		};
+		const gone = clashing.$defs.a__b__Gone__tagged ?? {};
+		delete clashing.$defs.a__b__Gone__tagged;
+		clashing.$defs.a__b__Failure__tagged = {
+			...gone,
+			properties: {
+				...(gone.properties as object),
+				_tag: { type: "string", enum: ["Failure"] },
+			},
+		};
+		clashing.$defs.a__b__Get = {
+			...clashing.$defs.a__b__Get,
+			properties: {
+				...(clashing.$defs.a__b__Get?.properties as object),
+				error: { $ref: "#/$defs/a__b__Failure__tagged" },
+			},
+		};
+		expect(() => emitted(clashing)).toThrow(
+			"Failure would clash with Get.Failure; rename the struct",
+		);
+	});
+
+	test("fails on a struct that refers to the payload by its C++ name", () => {
+		const referring = structuredClone(schema);
+		Object.assign(referring.$defs.a__b__Gone__tagged.properties as object, {
+			query: { $ref: "#/$defs/a__b__Query" },
+		});
+		expect(() => emitted(referring)).toThrow(
+			"Gone refers to Query, which Get declares as Request",
 		);
 	});
 

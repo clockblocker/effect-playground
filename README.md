@@ -60,16 +60,17 @@ wire between Bun and C++: the request, the success and the two errors.
 1. reflect-cpp turns them into JSON Schema:
    `effect-playground-cpp --emit-schema` writes `cpp/protocol.schema.json`,
    adding each error's message template as `x-message`.
-2. `scripts/generate.ts` turns that into Effect Schema in
-   `src/shared/generated/`: one module per method, `read-file.ts`, and an
-   index, `reader-protocol.ts`, that exports it as the namespace `ReadFile`
-   next to the `ReaderProtocol` RPC group. `ReadFile.Request`,
-   `ReadFile.Success` and `ReadFile.Error` are the payload, the success and
-   the error union, and `ReadFile.NotTxtFile` and `ReadFile.FileNotFound` the
-   `Schema.TaggedError` classes, each with a `message` getter. The module
-   declares `ReadFileSuccess` and exports it as `Success`, so a hover still
-   says `ReadFileSuccess`. A struct two methods share would have no module,
-   so the generator fails on one.
+2. `scripts/generate.ts` turns that into Effect Schema in one module,
+   `src/shared/generated/reader-protocol.ts`: a TypeScript namespace per
+   method, named after it, such as `ReadFile`, and the `ReaderProtocol` RPC
+   group. `ReadFile.Request`, `ReadFile.Success` and `ReadFile.Failure` are
+   the payload, the success and the error union (`Failure`, because an
+   `Error` there would shadow the global one), and `ReadFile.NotTxtFile`
+   and `ReadFile.FileNotFound` the `Schema.TaggedError` classes, each with a
+   `message` getter. Each name is both the schema and its type, so
+   `ReadFile.Success` works in either position, and TypeScript 7 hovers read
+   `ReadFile.Success`. A struct two methods share would have no namespace, so
+   the generator fails on one.
 3. Both readers fail with those error classes, and `src/shared/rest-api.ts`
    gives them their HTTP statuses.
 

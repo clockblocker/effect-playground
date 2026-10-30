@@ -19,7 +19,7 @@ export class CppReader extends Context.Service<
 			name: string,
 		) => Effect.Effect<
 			ReadFile.Success,
-			ReadFile.Error | ReaderUnavailable
+			ReadFile.Failure | ReaderUnavailable
 		>;
 	}
 >()("effect-playground/CppReader") {

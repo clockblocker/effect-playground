@@ -22,7 +22,7 @@ export class RestFiles extends Context.Service<
 			name: string,
 		) => Effect.Effect<
 			string,
-			| ReadFile.Error
+			| ReadFile.Failure
 			| HttpClientError.HttpClientError
 			| Schema.SchemaError
 		>;
@@ -30,7 +30,7 @@ export class RestFiles extends Context.Service<
 			name: string,
 		) => Effect.Effect<
 			string,
-			| ReadFile.Error
+			| ReadFile.Failure
 			| ReaderUnavailable
 			| HttpClientError.HttpClientError
 			| Schema.SchemaError

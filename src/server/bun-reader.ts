@@ -8,7 +8,7 @@ export class BunReader extends Context.Service<
 	{
 		readonly read: (
 			name: string,
-		) => Effect.Effect<ReadFile.Success, ReadFile.Error>;
+		) => Effect.Effect<ReadFile.Success, ReadFile.Failure>;
 	}
 >()("effect-playground/BunReader") {
 	static readonly layer = Layer.effect(

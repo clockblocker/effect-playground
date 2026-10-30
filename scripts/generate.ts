@@ -24,14 +24,12 @@ const binary = buildCpp();
 const emitted = Bun.spawnSync([binary, "--emit-schema"], { stderr: "inherit" });
 if (emitted.exitCode !== 0) throw new Error("--emit-schema failed");
 const schema = emitted.stdout.toString();
-const modules = emit(normalize(JSON.parse(schema)), header);
+const output = emit(normalize(JSON.parse(schema)), header);
+const outputPath = join(generated, output.file);
 
 const artifacts: ReadonlyArray<readonly [string, string]> = [
 	[schemaPath, schema],
-	...[...modules].map(([file, source]) => {
-		const path = join(generated, file);
-		return [path, format(source, path)] as const;
-	}),
+	[outputPath, format(output.source, outputPath)],
 ];
 const leftovers = readdirSync(generated)
 	.map((file) => join(generated, file))
