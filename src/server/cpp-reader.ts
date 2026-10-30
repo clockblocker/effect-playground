@@ -46,8 +46,13 @@ export class CppReader extends Context.Service<
 			CppReader,
 			Effect.gen(function* () {
 				const client = yield* RpcClient.make(ReaderProtocol);
-				const read = Effect.fn("CppReader.read")((name: string) =>
-					client.ReadFile({ name }).pipe(
+				// A generator body, not an arrow: Effect.fn gives an arrow body the
+				// expected return type Effect<A, any, any>, and catchTag then infers
+				// its error type from that `any`.
+				const read = Effect.fn("CppReader.read")(function* (
+					name: string,
+				) {
+					return yield* client.ReadFile({ name }).pipe(
 						Effect.timeoutOrElse({
 							duration: "5 seconds",
 							orElse: () =>
@@ -64,8 +69,8 @@ export class CppReader extends Context.Service<
 								),
 							),
 						),
-					),
-				);
+					);
+				});
 				return CppReader.of({ read });
 			}),
 		).pipe(
