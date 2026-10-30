@@ -1,16 +1,17 @@
 import { Schema } from "effect";
+import { Reader } from "./reader.ts";
 
 // Errors are schemas, so they cross the wire and arrive on the client as the
-// same classes. `httpApiStatus` is read only by the REST transport.
+// same classes. NotTxtFile and FileNotFound come from the C++ protocol, so the
+// Bun and C++ readers fail with one definition of each.
+export { FileNotFound, NotTxtFile } from "./generated/reader-protocol.ts";
 
-export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()(
-	"NotTxtFile",
-	{ name: Schema.String },
-	{ httpApiStatus: 415 },
-) {}
-
-export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
-	"FileNotFound",
-	{ name: Schema.String },
-	{ httpApiStatus: 404 },
+/**
+ * The Bun server couldn't reach a reader: the C++ reader isn't running, or
+ * the server was started without it. It belongs to the Bun↔C++ bridge, not
+ * to the C++ protocol, so it is defined here rather than in C++.
+ */
+export class ReaderUnavailable extends Schema.TaggedError<ReaderUnavailable>()(
+	"ReaderUnavailable",
+	{ reader: Reader, message: Schema.String },
 ) {}

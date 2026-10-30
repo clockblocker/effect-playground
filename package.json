@@ -11,7 +11,10 @@
 		"check": "tsc -p tsconfig.json --noEmit",
 		"lint": "biome check --error-on-warnings .",
 		"fix": "biome check --write .",
-		"knip": "knip"
+		"knip": "knip",
+		"test": "bun test",
+		"generate": "bun scripts/generate.ts",
+		"generate:check": "bun scripts/generate.ts --check"
 	},
 	"dependencies": {
 		"@effect/platform-bun": "4.0.0",
