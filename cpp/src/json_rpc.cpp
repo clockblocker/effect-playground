@@ -4,6 +4,7 @@
 #include <variant>
 #include <vector>
 
+#include "error_message.hpp"
 #include "read_file.hpp"
 #include "reader_protocol.hpp"
 
@@ -85,14 +86,6 @@ struct Control {
 
 constexpr std::string_view control_prefix = "@effect/rpc/";
 
-// "reader_protocol::ReadFile" → "ReadFile".
-template <class T>
-std::string unqualified_name() {
-	const std::string name = rfl::type_name_t<T>().str();
-	const auto separator = name.rfind("::");
-	return separator == std::string::npos ? name : name.substr(separator + 2);
-}
-
 std::string die(const rfl::Generic& id, const std::string& message) {
 	return rfl::json::write(ErrorResponse<Die>{
 		.id = id,
@@ -112,14 +105,14 @@ std::string respond(const rfl::Generic& id, const reader::ReadFileOutcome& outco
 			ResultResponse<ReadFileSuccess>{.id = id, .result = *success});
 	}
 	const auto& error = std::get<ReadFileError>(outcome);
-	const auto tag = rfl::visit(
-		[](const auto& alternative) {
-			return unqualified_name<std::decay_t<decltype(alternative)>>();
-		},
+	// Effect puts the error's own message here, as the client's getter would.
+	const auto message = rfl::visit(
+		[](const auto& alternative) { return error_message::fill(alternative); },
 		error);
 	return rfl::json::write(ErrorResponse<Fail<ReadFileError>>{
 		.id = id,
-		.error = {.message = tag, .data = {Fail<ReadFileError>{.error = error}}},
+		.error = {.message = message,
+				  .data = {Fail<ReadFileError>{.error = error}}},
 	});
 }
 
@@ -146,7 +139,7 @@ std::optional<std::string> handle_message(const rfl::Generic& message,
 		return response;
 	};
 
-	if (method != unqualified_name<ReadFile>()) {
+	if (method != error_message::unqualified_name<ReadFile>()) {
 		return answer(die(id, "Unknown method: " + method));
 	}
 	const auto request =

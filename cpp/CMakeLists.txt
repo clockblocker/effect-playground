@@ -26,6 +26,7 @@ FetchContent_MakeAvailable(reflectcpp)
 add_executable(effect-playground-cpp
 	src/main.cpp
 	src/json_rpc.cpp
+	src/protocol_schema.cpp
 	src/read_file.cpp
 	src/tcp_server.cpp
 	src/watchdog.cpp

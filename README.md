@@ -58,13 +58,28 @@ The C++ structs in `cpp/include/reader_protocol.hpp` define what crosses the
 wire between Bun and C++: the request, the success and the two errors.
 
 1. reflect-cpp turns them into JSON Schema:
-   `effect-playground-cpp --emit-schema` writes `cpp/protocol.schema.json`.
+   `effect-playground-cpp --emit-schema` writes `cpp/protocol.schema.json`,
+   adding each error's message template as `x-message`.
 2. `scripts/generate.ts` turns that into Effect Schema in
-   `src/shared/generated/reader-protocol.ts`: a `Schema.TaggedError` per error,
-   a struct and type per message, and the `ReaderProtocol` RPC group.
+   `src/shared/generated/reader-protocol.ts`: a `Schema.TaggedError` per error
+   with a `message` getter, a struct and type per message, and the
+   `ReaderProtocol` RPC group.
 3. Both readers fail with those error classes; `src/shared/errors.ts`
    re-exports them, and `src/shared/rest-api.ts` gives them their HTTP
    statuses.
+
+Each error's sentence lives on its C++ struct, as
+`static constexpr std::string_view message = "\"{file}\" is not a .txt file"`.
+The generated class fills it in from its own fields in a `message` getter,
+so `error.message` and `String(error)` read
+`NotTxtFile: "config.json" is not a .txt file`, while the wire form stays
+`{"_tag":"NotTxtFile","file":"config.json"}`. The C++ reader fills in the same
+template for the `message` of its JSON-RPC error. The generator fails on an
+error without a template, on a `{field}` the struct doesn't have, and on a
+field named `name`, `message`, `stack` or `cause`, which would shadow the
+`Error`'s own. `ReaderUnavailable` is the Bun server's, so its sentence lives
+in `src/shared/errors.ts`; the client's transport errors get their wording in
+the client.
 
 A field's reflect-cpp validators travel the same way. `ReadFileRequest::name`
 is an `rfl::Validator` with two `rfl::Size` bounds, so the schema carries

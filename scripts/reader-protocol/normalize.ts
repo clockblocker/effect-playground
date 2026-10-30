@@ -9,6 +9,11 @@ export interface Definition {
 	readonly docs: ReadonlyMap<string, string>;
 	/** Set when the struct is an alternative of an `rfl::TaggedUnion<"_tag", …>`. */
 	readonly tag: string | undefined;
+	/**
+	 * An error's message template, from the struct's `static constexpr
+	 * std::string_view message`, with `{field}` standing for a field's value.
+	 */
+	readonly message: string | undefined;
 }
 
 /** The root struct: a procedure, never sent, naming what it takes and returns. */
@@ -28,6 +33,16 @@ export interface Protocol {
 
 const definitionRef = "#/$defs/";
 const taggedSuffix = "__tagged";
+const messageKeyword = "x-message";
+
+/** A `{field}` in a message template; splitting by it alternates text and field. */
+export const placeholder = /\{([^{}]*)\}/g;
+
+/**
+ * Fields an error can't have, because every JavaScript `Error` has them: a
+ * field `name` would turn `String(error)` into `config.json: …`.
+ */
+const errorOwnFields = new Set(["name", "message", "stack", "cause"]);
 
 /**
  * Reads the JSON Schema that reflect-cpp emits for the procedure struct and
@@ -95,9 +110,21 @@ export function normalize(document: unknown): Protocol {
 		refName(Predicate.isObject(alternative) ? alternative : {}, "error"),
 	);
 	for (const name of errors) {
-		if (definitions.get(name)?.tag !== name) {
+		const definition = definitions.get(name);
+		if (definition?.tag !== name) {
 			throw new Error(
 				`${name} must be an alternative of rfl::TaggedUnion<"_tag", …>`,
+			);
+		}
+		checkError(definition);
+	}
+	for (const definition of definitions.values()) {
+		if (
+			definition.message !== undefined &&
+			!errors.includes(definition.name)
+		) {
+			throw new Error(
+				`${definition.name} has a message template, but only errors take one`,
 			);
 		}
 	}
@@ -115,6 +142,39 @@ export function normalize(document: unknown): Protocol {
 	};
 }
 
+/**
+ * An error needs a message template whose every `{field}` is one of its
+ * fields, and no field that would shadow `Error`'s own.
+ */
+function checkError(definition: Definition): void {
+	const { name, message } = definition;
+	const fields = Object.keys(definition.schema.properties ?? {}).filter(
+		(field) => field !== "_tag",
+	);
+	for (const field of fields) {
+		if (errorOwnFields.has(field)) {
+			throw new Error(
+				`${name}.${field} would shadow Error.${field}; rename the field`,
+			);
+		}
+	}
+	if (message === undefined) {
+		throw new Error(
+			`${name} has no message template: give the C++ struct a ` +
+				`\`static constexpr std::string_view message\`, which the schema ` +
+				`carries as "${messageKeyword}"`,
+		);
+	}
+	for (const [, field = ""] of message.matchAll(placeholder)) {
+		if (!fields.includes(field)) {
+			throw new Error(
+				`${name}'s message names {${field}}, but ${name} has no such ` +
+					`field (it has ${fields.map((f) => `{${f}}`).join(", ") || "none"})`,
+			);
+		}
+	}
+}
+
 function normalizeDefinition(
 	name: string,
 	raw: unknown,
@@ -126,6 +186,10 @@ function normalizeDefinition(
 		!Predicate.isObject(raw.properties)
 	) {
 		throw new Error(`${name} must be a struct`);
+	}
+	const { [messageKeyword]: message, ...definition } = raw;
+	if (message !== undefined && typeof message !== "string") {
+		throw new Error(`${name}'s ${messageKeyword} must be a string`);
 	}
 	const docs = new Map<string, string>();
 	const properties: Record<string, JsonSchema.JsonSchema> = {};
@@ -144,9 +208,10 @@ function normalizeDefinition(
 	}
 	return {
 		name,
-		schema: { ...raw, properties, additionalProperties: false },
+		schema: { ...definition, properties, additionalProperties: false },
 		docs,
 		tag,
+		message,
 	};
 }
 

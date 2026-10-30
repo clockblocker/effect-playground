@@ -15,10 +15,18 @@
 //   UTF-8 bytes and Effect counts code points, which agree for ASCII names.
 // - An error is a struct listed in `ReadFile::error`. Its struct name is the
 //   `_tag` both sides match on.
+// - An error's `static constexpr std::string_view message` is what a person
+//   reads when it happens, with `{field}` standing for that field's value. A
+//   static member isn't a field, so it never crosses the wire: the schema
+//   carries it as `x-message`, and the generated class gets a `message`
+//   getter that fills it in. This reader fills it in for the message of its
+//   JSON-RPC error. The generator fails on an error without one, or on a
+//   `{field}` the struct doesn't have.
 
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <string>
+#include <string_view>
 
 namespace reader_protocol {
 
@@ -36,15 +44,17 @@ struct ReadFileSuccess {
 };
 
 struct NotTxtFile {
+	static constexpr std::string_view message = "\"{file}\" is not a .txt file";
 	rfl::Description<"The requested name, which does not end in .txt.",
 					 std::string>
-		name;
+		file;
 };
 
 struct FileNotFound {
+	static constexpr std::string_view message = "\"{file}\" does not exist";
 	rfl::Description<"The requested name; no such .txt file exists.",
 					 std::string>
-		name;
+		file;
 };
 
 // The errors ReadFile can fail with, tagged by struct name in `_tag`.

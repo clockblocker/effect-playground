@@ -19,14 +19,9 @@ export type Outcome =
 const contents = (text: string): Outcome => ({ kind: "contents", text });
 const failed = (message: string) =>
 	Effect.succeed<Outcome>({ kind: "error", message });
-const notTxt = (error: NotTxtFile) =>
-	failed(`"${error.name}" is not a .txt file`);
-const notFound = (error: FileNotFound) =>
-	failed(`"${error.name}" does not exist`);
-const unavailable = (error: ReaderUnavailable) =>
-	failed(
-		`The ${readerLabels[error.reader]} reader is unavailable: ${error.message}`,
-	);
+const notTxt = (error: NotTxtFile) => failed(error.message);
+const notFound = (error: FileNotFound) => failed(error.message);
+const unavailable = (error: ReaderUnavailable) => failed(error.message);
 // Each transport's own errors and nothing else, so a domain error that
 // catchTags misses is a compile error rather than a silent "Request failed".
 const requestFailed = (error: { readonly message: string }) =>

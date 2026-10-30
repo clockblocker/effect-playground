@@ -71,8 +71,18 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 					contents: await Bun.file(`${files}/hello.txt`).text(),
 				},
 			},
-			causeResponse(1, { _tag: "NotTxtFile", name: "a.json" }),
-			causeResponse("2", { _tag: "FileNotFound", name: "x.txt" }),
+			// The error carries the file, never prose; the envelope's message is
+			// the C++ struct's template, filled in.
+			causeResponse(
+				1,
+				{ _tag: "NotTxtFile", file: "a.json" },
+				'"a.json" is not a .txt file',
+			),
+			causeResponse(
+				"2",
+				{ _tag: "FileNotFound", file: "x.txt" },
+				'"x.txt" does not exist',
+			),
 			{ jsonrpc: "2.0", method: "@effect/rpc/Pong" },
 		]);
 	});
@@ -116,10 +126,13 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 	test("the Effect RPC client gets NotTxtFile as its class", async () => {
 		const result = await read("config.json");
 		expect(result._tag === "Failure" && result.failure).toEqual(
-			new NotTxtFile({ name: "config.json" }),
+			new NotTxtFile({ file: "config.json" }),
 		);
 		expect(result._tag === "Failure" && result.failure).toBeInstanceOf(
 			NotTxtFile,
+		);
+		expect(result._tag === "Failure" && result.failure.message).toBe(
+			'"config.json" is not a .txt file',
 		);
 	});
 
@@ -187,14 +200,14 @@ describe("C++ reader bridge", () => {
 	});
 });
 
-function causeResponse(id: number | string, error: object) {
+function causeResponse(id: number | string, error: object, message: string) {
 	return {
 		jsonrpc: "2.0",
 		id,
 		error: {
 			_tag: "Cause",
 			code: 0,
-			message: (error as { _tag: string })._tag,
+			message,
 			data: [{ _tag: "Fail", error }],
 		},
 	};

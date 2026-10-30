@@ -31,16 +31,24 @@ export interface ReadFileSuccess
 
 export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()("NotTxtFile", {
 	/** The requested name, which does not end in .txt. */
-	name: Schema.String,
-}) {}
+	file: Schema.String,
+}) {
+	override get message(): string {
+		return `"${this.file}" is not a .txt file`;
+	}
+}
 
 export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
 	"FileNotFound",
 	{
 		/** The requested name; no such .txt file exists. */
-		name: Schema.String,
+		file: Schema.String,
 	},
-) {}
+) {
+	override get message(): string {
+		return `"${this.file}" does not exist`;
+	}
+}
 
 /** Every error ReadFile can fail with. */
 export const ReadFileError = Schema.Union([NotTxtFile, FileNotFound]);

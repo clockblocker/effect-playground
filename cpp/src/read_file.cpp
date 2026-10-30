@@ -14,7 +14,7 @@ ReadFileOutcome read_file(const std::filesystem::path& directory,
 	const std::string& name = request.name().value();
 	const std::filesystem::path requested(name);
 	if (requested.extension() != ".txt") {
-		return ReadFileError(NotTxtFile{.name = name});
+		return ReadFileError(NotTxtFile{.file = name});
 	}
 	// filename() keeps "../../etc/passwd.txt" inside the files directory.
 	const auto path = directory / requested.filename();
@@ -22,7 +22,7 @@ ReadFileOutcome read_file(const std::filesystem::path& directory,
 	std::error_code error;
 	const auto status = std::filesystem::status(path, error);
 	if (status.type() == std::filesystem::file_type::not_found) {
-		return ReadFileError(FileNotFound{.name = name});
+		return ReadFileError(FileNotFound{.file = name});
 	}
 	if (error || status.type() != std::filesystem::file_type::regular) {
 		// Permissions, a directory named x.txt: a bug, not a case the client

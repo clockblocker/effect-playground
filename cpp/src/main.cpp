@@ -25,7 +25,7 @@
 #include <string_view>
 #include <vector>
 
-#include "reader_protocol.hpp"
+#include "protocol_schema.hpp"
 #include "tcp_server.hpp"
 #include "watchdog.hpp"
 
@@ -178,9 +178,7 @@ int supervise(const sigset_t& waited, pid_t child) {
 int main(int argc, char** argv) {
 	const Options options = parse_options(argc, argv);
 	if (options.emit_schema) {
-		std::cout << rfl::json::to_schema<reader_protocol::ReadFile>(
-						 rfl::json::pretty)
-				  << "\n";
+		std::cout << protocol_schema::emit() << "\n";
 		return 0;
 	}
 

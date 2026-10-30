@@ -14,8 +14,8 @@ import {
 const wire = {
 	request: { name: "hello.txt" },
 	success: { contents: "Hello\n" },
-	notTxtFile: { _tag: "NotTxtFile", name: "config.json" },
-	fileNotFound: { _tag: "FileNotFound", name: "missing.txt" },
+	notTxtFile: { _tag: "NotTxtFile", file: "config.json" },
+	fileNotFound: { _tag: "FileNotFound", file: "missing.txt" },
 } as const;
 
 describe("generated reader protocol", () => {
@@ -46,22 +46,40 @@ describe("generated reader protocol", () => {
 		const decode = Schema.decodeUnknownSync(ReadFileError);
 		const notTxt = decode(wire.notTxtFile);
 		expect(notTxt).toBeInstanceOf(NotTxtFile);
-		expect(notTxt.name).toBe("config.json");
+		expect(notTxt.file).toBe("config.json");
 		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
 		expect(Schema.encodeSync(ReadFileError)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
-		expect(() => decode({ _tag: "Elsewhere", name: "x" })).toThrow();
+		expect(() => decode({ _tag: "Elsewhere", file: "x" })).toThrow();
+	});
+
+	test("errors fill their C++ message template, and send none of it", () => {
+		const notTxt = new NotTxtFile({ file: "config.json" });
+		expect(notTxt.message).toBe('"config.json" is not a .txt file');
+		expect(String(notTxt)).toStartWith(
+			'NotTxtFile: "config.json" is not a .txt file',
+		);
+		expect(new FileNotFound({ file: "missing.txt" }).message).toBe(
+			'"missing.txt" does not exist',
+		);
+		expect(Schema.encodeSync(ReadFileError)(notTxt)).toEqual(
+			wire.notTxtFile,
+		);
+		const decoded = Schema.decodeUnknownSync(ReadFileError)(
+			wire.fileNotFound,
+		);
+		expect(decoded.message).toBe('"missing.txt" does not exist');
 	});
 
 	test("errors can be raised and caught by tag", async () => {
 		const caught = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* new NotTxtFile({ name: "a.md" });
+				return yield* new NotTxtFile({ file: "a.md" });
 			}).pipe(
 				Effect.catchTags({
 					NotTxtFile: (error) =>
-						Effect.succeed(`not txt: ${error.name}`),
+						Effect.succeed(`not txt: ${error.file}`),
 				}),
 			),
 		);
@@ -95,9 +113,14 @@ describe("emitter", () => {
 			},
 			a__b__Gone__tagged: {
 				type: "object",
-				properties: { _tag: { type: "string", enum: ["Gone"] } },
-				required: ["_tag"],
-			},
+				// Backticks, $ and \ are literal text in the generated getter.
+				"x-message": "`{id}` is gone; $ and \\ stay",
+				properties: {
+					_tag: { type: "string", enum: ["Gone"] },
+					id: { type: "integer" },
+				},
+				required: ["_tag", "id"],
+			} as Record<string, unknown>,
 		},
 	};
 
@@ -135,6 +158,43 @@ describe("emitter", () => {
 		);
 		expect(source).toContain(
 			'tags: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinCodePoints(2, { message: "Must be at least 2 characters long" }))).check(Schema.isMinLength(1)',
+		);
+	});
+
+	test("gives an error a message getter from its template", () => {
+		const source = emit(normalize(schema), ["header"]);
+		const [, body = ""] =
+			/override get message\(\): string \{\nreturn (.*);\n\}/.exec(
+				source,
+			) ?? [];
+		const message = new Function(`return ${body};`).call({ id: 7 });
+		expect(message).toBe("`7` is gone; $ and \\ stay");
+		expect(source).not.toContain("x-message");
+	});
+
+	test("rejects an error without a message template", () => {
+		const untemplated = structuredClone(schema);
+		delete untemplated.$defs.a__b__Gone__tagged["x-message"];
+		expect(() => normalize(untemplated)).toThrow(
+			/Gone has no message template/,
+		);
+	});
+
+	test("rejects a template that names a field the error lacks", () => {
+		const misnamed = structuredClone(schema);
+		misnamed.$defs.a__b__Gone__tagged["x-message"] = "{id} or {name}";
+		expect(() => normalize(misnamed)).toThrow(
+			"Gone's message names {name}, but Gone has no such field (it has {id})",
+		);
+	});
+
+	test("rejects an error field that would shadow Error's own", () => {
+		const shadowing = structuredClone(schema);
+		Object.assign(shadowing.$defs.a__b__Gone__tagged.properties as object, {
+			name: { type: "string" },
+		});
+		expect(() => normalize(shadowing)).toThrow(
+			"Gone.name would shadow Error.name; rename the field",
 		);
 	});
 

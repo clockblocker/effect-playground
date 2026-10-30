@@ -7,8 +7,7 @@ import {
 	type ReadFileSuccess,
 } from "../shared/generated/reader-protocol.ts";
 
-const unavailable = (message: string) =>
-	new ReaderUnavailable({ reader: "cpp", message });
+const unavailable = (detail: string) => new ReaderUnavailable({ detail });
 
 // The C++ reader, called over JSON-RPC on the TCP port the launcher passes in
 // EFFECT_PLAYGROUND_CPP_PORT. A transport failure becomes ReaderUnavailable,

@@ -1,5 +1,5 @@
 import { SchemaRepresentation } from "effect";
-import type { Definition, Protocol } from "./normalize.ts";
+import { type Definition, type Protocol, placeholder } from "./normalize.ts";
 
 /**
  * Writes the Effect Schema module for a normalized protocol.
@@ -52,10 +52,19 @@ function declare(
 	const { name, tag } = definition;
 	const fields = fieldsOf(definition, definitions);
 	if (tag !== undefined) {
+		if (definition.message === undefined) {
+			throw new Error(`${name} is tagged but has no message template`);
+		}
 		return [
 			`export class ${name} extends Schema.TaggedError<${name}>()(${JSON.stringify(tag)}, {`,
 			...fields,
-			"}) {}",
+			"}) {",
+			// A getter, not a field: the message never crosses the wire, and
+			// every decoded instance still has it.
+			"override get message(): string {",
+			`return ${messageCode(definition.message)};`,
+			"}",
+			"}",
 			"",
 		].join("\n");
 	}
@@ -68,6 +77,20 @@ function declare(
 		`export interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
 		"",
 	].join("\n");
+}
+
+/** `"{file}" is not a .txt file` → a template literal over `this.file`. */
+function messageCode(template: string): string {
+	const parts = template.split(placeholder);
+	const code = parts.map((part, index) =>
+		index % 2 === 1
+			? `\${this.${part}}`
+			: part
+					.replaceAll("\\", "\\\\")
+					.replaceAll("`", "\\`")
+					.replaceAll("${", "\\${"),
+	);
+	return `\`${code.join("")}\``;
 }
 
 function fieldsOf(

@@ -4,6 +4,7 @@
     "$defs": {
         "reader_protocol__FileNotFound__tagged": {
             "type": "object",
+            "x-message": "\"{file}\" does not exist",
             "properties": {
                 "_tag": {
                     "type": "string",
@@ -11,18 +12,19 @@
                         "FileNotFound"
                     ]
                 },
-                "name": {
+                "file": {
                     "type": "string",
                     "description": "The requested name; no such .txt file exists."
                 }
             },
             "required": [
                 "_tag",
-                "name"
+                "file"
             ]
         },
         "reader_protocol__NotTxtFile__tagged": {
             "type": "object",
+            "x-message": "\"{file}\" is not a .txt file",
             "properties": {
                 "_tag": {
                     "type": "string",
@@ -30,14 +32,14 @@
                         "NotTxtFile"
                     ]
                 },
-                "name": {
+                "file": {
                     "type": "string",
                     "description": "The requested name, which does not end in .txt."
                 }
             },
             "required": [
                 "_tag",
-                "name"
+                "file"
             ]
         },
         "reader_protocol__ReadFile": {
