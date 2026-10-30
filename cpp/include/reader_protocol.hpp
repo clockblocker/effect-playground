@@ -9,6 +9,10 @@
 // Effect Schema of the same name.
 //
 // - A field's `rfl::Description` becomes the JSDoc on the TS field.
+// - A string's `rfl::Size` bounds become `minLength` / `maxLength`, then
+//   Effect length checks. reflect-cpp rejects a request that breaks one, and
+//   so does every Effect boundary that decodes the generated schema. C++ counts
+//   UTF-8 bytes and Effect counts code points, which agree for ASCII names.
 // - An error is a struct listed in `ReadFile::error`. Its struct name is the
 //   `_tag` both sides match on.
 
@@ -22,7 +26,8 @@ struct ReadFileRequest {
 	rfl::Description<
 		"The file to read, such as \"hello.txt\". Only its base name is used, so "
 		"a request never leaves the files directory.",
-		std::string>
+		rfl::Validator<std::string, rfl::Size<rfl::Minimum<5>>,
+					   rfl::Size<rfl::Maximum<25>>>>
 		name;
 };
 

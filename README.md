@@ -4,6 +4,8 @@ A sandbox for learning Effect. Type a file name, pick a reader, submit, and
 the file's contents come back, once over REST (`effect/http-api`) and once
 over Effect RPC (`effect/rpc`). Files live in `files/`. A name that isn't
 `.txt` fails with `NotTxtFile`; a missing `.txt` fails with `FileNotFound`.
+A name must be 5 to 25 characters long. That rule lives on the C++ struct,
+and everything else gets it from the generated schema (see below).
 
 There are two readers: one in the Bun server, and one in C++ that the Bun
 server calls over JSON-RPC.
@@ -63,6 +65,20 @@ wire between Bun and C++: the request, the success and the two errors.
 3. Both readers fail with those error classes; `src/shared/errors.ts`
    re-exports them, and `src/shared/rest-api.ts` gives them their HTTP
    statuses.
+
+A field's reflect-cpp validators travel the same way. `ReadFileRequest::name`
+is an `rfl::Validator` with two `rfl::Size` bounds, so the schema carries
+`minLength: 5` and `maxLength: 25`, and the TS field is
+`Schema.String.check(Schema.isMinCodePoints(5, …), Schema.isMaxCodePoints(25, …))`.
+The generator writes each bound's message, because JSON Schema has no keyword
+to carry one. A name out of bounds isn't a domain error, so there's no tagged
+error for it. Each boundary rejects it:
+
+- REST: `:name` is `ReadFileRequest.fields.name`, so HttpApi answers 400, and
+  the REST client fails with a `SchemaError` before sending anything.
+- RPC: the client can't encode the payload and dies before sending. A raw
+  request gets an `Exit` whose cause is a `Die` with the schema's message.
+- C++: reflect-cpp can't parse the params, and the reader answers with a `Die`.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
 re-emits the schema and regenerates the TypeScript. Both outputs are

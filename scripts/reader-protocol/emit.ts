@@ -113,21 +113,88 @@ function fieldCode(
 	}
 	const [root] = code.codes;
 	if (root === undefined) throw new Error("The engine emitted no code");
-	return shorthands.reduce(
-		(runtime, [spelledOut, shorthand]) =>
-			runtime.replaceAll(spelledOut, shorthand),
-		root.runtime,
+	return mergeChecks(
+		shorthands.reduce(
+			(runtime, [spelledOut, shorthand]) =>
+				typeof shorthand === "string"
+					? runtime.replaceAll(spelledOut, shorthand)
+					: runtime.replaceAll(spelledOut, shorthand),
+			root.runtime,
+		),
 	);
 }
 
 // The engine spells out what a hand-written schema would name: a C++ int
 // arrives as a check that is exactly Schema.Int.
-const shorthands: ReadonlyArray<readonly [string, string]> = [
+//
+// A string's minLength and maxLength (from rfl::Size) arrive as code point
+// checks, annotated with the very `expected` text each check has by default.
+// That annotation goes, and the check gets a message a person can read
+// instead of "Expected a string with at least 5 code points". reflect-cpp's
+// JSON Schema has no keyword for a message, so the wording lives here, once
+// for every length bound.
+const shorthands: ReadonlyArray<
+	readonly [
+		string | RegExp,
+		string | ((match: string, ...groups: string[]) => string),
+	]
+> = [
 	[
 		'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
 		"Schema.Int",
 	],
+	[
+		/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g,
+		(_, bound = "", count = "") =>
+			`Schema.is${bound}CodePoints(${count}, { message: ${JSON.stringify(
+				`Must be at ${bound === "Min" ? "least" : "most"} ${count} characters long`,
+			)} })`,
+	],
 ];
+
+/**
+ * The engine chains one `.check(…)` per check; a hand-written schema passes
+ * them to one call. Merges only calls that follow each other on the same
+ * schema, skipping over parentheses inside string literals.
+ */
+function mergeChecks(runtime: string): string {
+	const open = ".check(";
+	let result = "";
+	let index = 0;
+	while (index < runtime.length) {
+		const start = runtime.indexOf(open, index);
+		if (start === -1) return result + runtime.slice(index);
+		let end = closingParen(runtime, start + open.length);
+		const args = [runtime.slice(start + open.length, end)];
+		while (runtime.startsWith(open, end + 1)) {
+			const next = end + 1 + open.length;
+			end = closingParen(runtime, next);
+			args.push(runtime.slice(next, end));
+		}
+		result += `${runtime.slice(index, start)}${open}${args.map(mergeChecks).join(", ")})`;
+		index = end + 1;
+	}
+	return result;
+}
+
+/** The index of the `)` that closes the call whose arguments start at `from`. */
+function closingParen(code: string, from: number): number {
+	let depth = 0;
+	for (let index = from; index < code.length; index++) {
+		const char = code[index];
+		if (char === '"') {
+			while (++index < code.length && code[index] !== '"') {
+				if (code[index] === "\\") index++;
+			}
+		} else if (char === "(") {
+			depth++;
+		} else if (char === ")") {
+			if (depth === 0) return index;
+			depth--;
+		}
+	}
+	throw new Error(`Unbalanced parentheses in ${code}`);
+}
 
 /** Referenced structs before the structs that use them, roots in order. */
 function dependencyOrder(

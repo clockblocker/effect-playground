@@ -70,8 +70,17 @@
             "type": "object",
             "properties": {
                 "name": {
-                    "type": "string",
-                    "description": "The file to read, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory."
+                    "description": "The file to read, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory.",
+                    "allOf": [
+                        {
+                            "type": "string",
+                            "minLength": 5
+                        },
+                        {
+                            "type": "string",
+                            "maxLength": 25
+                        }
+                    ]
                 }
             },
             "required": [

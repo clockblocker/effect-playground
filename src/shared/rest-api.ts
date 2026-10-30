@@ -6,6 +6,7 @@ import {
 	HttpApiSchema,
 } from "effect/http-api";
 import { FileNotFound, NotTxtFile, ReaderUnavailable } from "./errors.ts";
+import { ReadFileRequest } from "./generated/reader-protocol.ts";
 
 // One endpoint per reader, so each declares only the errors it can return:
 // GET /api/bun/files/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
@@ -17,7 +18,9 @@ const readFileErrors = [
 	FileNotFound.pipe(HttpApiSchema.status(404)),
 ] as const;
 
-const params = { name: Schema.String };
+// The generated field, so a name the C++ protocol rejects (too short, too
+// long) never reaches a handler: HttpApi answers 400 itself.
+const params = { name: ReadFileRequest.fields.name };
 const success = Schema.String.pipe(HttpApiSchema.asText());
 
 export class FilesApi extends HttpApi.make("files-api").add(

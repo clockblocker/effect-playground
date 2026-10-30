@@ -31,6 +31,17 @@ describe("generated reader protocol", () => {
 		).toThrow();
 	});
 
+	test("a name must be 5 to 25 characters, as the C++ struct says", () => {
+		const accepts = Schema.is(ReadFileRequest);
+		expect(accepts({ name: "a".repeat(4) })).toBe(false);
+		expect(accepts({ name: "a".repeat(5) })).toBe(true);
+		expect(accepts({ name: "a".repeat(25) })).toBe(true);
+		expect(accepts({ name: "a".repeat(26) })).toBe(false);
+		expect(() =>
+			Schema.decodeUnknownSync(ReadFileRequest)({ name: "x.md" }),
+		).toThrow("Must be at least 5 characters long");
+	});
+
 	test("errors decode into the TaggedError classes and encode back", () => {
 		const decode = Schema.decodeUnknownSync(ReadFileError);
 		const notTxt = decode(wire.notTxtFile);
@@ -99,6 +110,32 @@ describe("emitter", () => {
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
 		expect(source).toContain("export class AB extends RpcGroup.make(");
 		expect(source).not.toContain("__");
+	});
+
+	test("names length bounds the way a hand-written schema does", () => {
+		const bounded = structuredClone(schema);
+		Object.assign(bounded.$defs.a__b__Query.properties, {
+			// rfl::Validator<std::string, rfl::Size<…>, rfl::Size<…>>
+			name: {
+				allOf: [
+					{ type: "string", minLength: 5 },
+					{ type: "string", maxLength: 25 },
+				],
+			},
+			// A bounded array of bounded strings: two schemas, two calls.
+			tags: {
+				type: "array",
+				items: { type: "string", minLength: 2 },
+				minItems: 1,
+			},
+		});
+		const source = emit(normalize(bounded), ["header"]);
+		expect(source).toContain(
+			'name: Schema.optionalKey(Schema.String.check(Schema.isMinCodePoints(5, { message: "Must be at least 5 characters long" }), Schema.isMaxCodePoints(25, { message: "Must be at most 25 characters long" }))),',
+		);
+		expect(source).toContain(
+			'tags: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinCodePoints(2, { message: "Must be at least 2 characters long" }))).check(Schema.isMinLength(1)',
+		);
 	});
 
 	test("rejects an error that isn't a tagged alternative", () => {

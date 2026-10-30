@@ -77,6 +77,34 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 		]);
 	});
 
+	test("reflect-cpp rejects a name shorter than 5 as a defect", async () => {
+		const [line = ""] = await exchange(
+			[
+				{
+					jsonrpc: "2.0",
+					id: 3,
+					method: "ReadFile",
+					params: { name: "x.md" },
+				},
+			],
+			1,
+		);
+		const message =
+			"Invalid ReadFile params: Failed to parse field 'name': Size " +
+			"validation failed: Value expected to be greater than or equal to " +
+			"5, but got 4.";
+		expect(JSON.parse(line)).toEqual({
+			jsonrpc: "2.0",
+			id: 3,
+			error: {
+				_tag: "Cause",
+				code: 0,
+				message,
+				data: [{ _tag: "Die", defect: { name: "Error", message } }],
+			},
+		});
+	});
+
 	test("the Effect RPC client reads contents", async () => {
 		const result = await read("hello.txt");
 		expect(result._tag).toBe("Success");

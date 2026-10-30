@@ -11,7 +11,7 @@ using namespace reader_protocol;
 
 ReadFileOutcome read_file(const std::filesystem::path& directory,
 						  const ReadFileRequest& request) {
-	const std::string& name = request.name();
+	const std::string& name = request.name().value();
 	const std::filesystem::path requested(name);
 	if (requested.extension() != ".txt") {
 		return ReadFileError(NotTxtFile{.name = name});

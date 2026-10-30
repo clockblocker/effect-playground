@@ -10,7 +10,14 @@ export const ReadFileRequest = Schema.Struct({
 	 * The file to read, such as "hello.txt". Only its base name is used, so a
 	 * request never leaves the files directory.
 	 */
-	name: Schema.String,
+	name: Schema.String.check(
+		Schema.isMinCodePoints(5, {
+			message: "Must be at least 5 characters long",
+		}),
+		Schema.isMaxCodePoints(25, {
+			message: "Must be at most 25 characters long",
+		}),
+	),
 });
 export interface ReadFileRequest
 	extends Schema.Schema.Type<typeof ReadFileRequest> {}
