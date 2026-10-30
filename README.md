@@ -48,7 +48,7 @@ Each reader has its own endpoint and procedure, so only the C++ ones declare
 `ReaderUnavailable`:
 
 - REST: `GET /api/bun/files/:name` and `GET /api/cpp/files/:name`, called as
-  `client.files.bun(…)` and `client.files.cpp(…)`.
+  `files.bun.read(…)` and `files.cpp.read(…)`.
 - RPC: `ReadFileBun({ name })` and `ReadFileCpp({ name })`, both over
   `POST /rpc`.
 

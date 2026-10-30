@@ -23,7 +23,8 @@ const withStatus =
 	> =>
 		self.pipe(HttpApiSchema.status(code));
 
-// One endpoint per reader, so each declares only the errors it can return:
+// One group per reader, each with a read endpoint, so the client reads
+// files.bun.read and files.cpp.read and each declares only its own errors:
 // GET /api/bun/files/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
 // GET /api/cpp/files/:name → the same, plus 503 ReaderUnavailable. The
 // statuses are attached here, because the errors are shared with RPC and the
@@ -38,22 +39,29 @@ const readFileErrors = [
 const params = { name: ReadFile.Request.fields.name };
 const success = Schema.String.pipe(HttpApiSchema.asText());
 
-export class FilesApi extends HttpApi.make("files-api").add(
-	HttpApiGroup.make("files")
-		.add(
-			HttpApiEndpoint.get("bun", "/bun/files/:name", {
-				params,
-				success,
-				error: readFileErrors,
-			}),
-			HttpApiEndpoint.get("cpp", "/cpp/files/:name", {
-				params,
-				success,
-				error: [
-					...readFileErrors,
-					ReaderUnavailable.pipe(withStatus(503)),
-				],
-			}),
-		)
-		.prefix("/api"),
-) {}
+export class FilesApi extends HttpApi.make("files")
+	.add(
+		HttpApiGroup.make("bun")
+			.add(
+				HttpApiEndpoint.get("read", "/files/:name", {
+					params,
+					success,
+					error: readFileErrors,
+				}),
+			)
+			.prefix("/api/bun"),
+	)
+	.add(
+		HttpApiGroup.make("cpp")
+			.add(
+				HttpApiEndpoint.get("read", "/files/:name", {
+					params,
+					success,
+					error: [
+						...readFileErrors,
+						ReaderUnavailable.pipe(withStatus(503)),
+					],
+				}),
+			)
+			.prefix("/api/cpp"),
+	) {}

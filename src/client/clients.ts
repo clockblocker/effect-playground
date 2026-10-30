@@ -16,14 +16,14 @@ type Plain<T> =
 		? Effect.Effect<A, E, R>
 		: never;
 
-// One reader per endpoint of a group, each read by file name. The errors are
-// the endpoint's own (from the contract) plus the client's transport errors,
-// all inferred, so nothing here restates them.
-type Readers<Group> = {
-	readonly [Reader in keyof Group]: {
-		readonly read: (
-			name: string,
-		) => Group[Reader] extends (...args: never) => infer Out
+// Each reader group's read endpoint, taking just the file name. The errors
+// are the endpoint's own (from the contract) plus the client's transport
+// errors, all inferred, so nothing here restates them.
+type Readers<Client> = {
+	readonly [Reader in keyof Client]: {
+		readonly read: (name: string) => Client[Reader] extends {
+			readonly read: (...args: never) => infer Out;
+		}
 			? Plain<Out>
 			: never;
 	};
@@ -33,21 +33,15 @@ type Readers<Group> = {
 // added to the contract fails RestFiles.of below until it is wired up.
 export class RestFiles extends Context.Service<
 	RestFiles,
-	Readers<HttpApiClient.ForApi<typeof FilesApi>["files"]>
+	Readers<HttpApiClient.ForApi<typeof FilesApi>>
 >()("effect-playground/RestFiles") {
 	static readonly layer = Layer.effect(
 		RestFiles,
-		Effect.map(
-			HttpApiClient.make(FilesApi, { baseUrl: origin }),
-			(client) =>
-				RestFiles.of({
-					bun: {
-						read: (name) => client.files.bun({ params: { name } }),
-					},
-					cpp: {
-						read: (name) => client.files.cpp({ params: { name } }),
-					},
-				}),
+		Effect.map(HttpApiClient.make(FilesApi, { baseUrl: origin }), (files) =>
+			RestFiles.of({
+				bun: { read: (name) => files.bun.read({ params: { name } }) },
+				cpp: { read: (name) => files.cpp.read({ params: { name } }) },
+			}),
 		),
 	);
 }
