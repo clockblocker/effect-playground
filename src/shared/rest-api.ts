@@ -25,8 +25,8 @@ const withStatus =
 
 // One group per reader, each with a read endpoint, so the client reads
 // files.bun.read and files.cpp.read and each declares only its own errors:
-// GET /api/bun/files/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
-// GET /api/cpp/files/:name → the same, plus 503 ReaderUnavailable. The
+// GET /api/bun/files/read/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
+// GET /api/cpp/files/read/:name → the same, plus 503 ReaderUnavailable. The
 // statuses are attached here, because the errors are shared with RPC and the
 // C++ protocol, and only this transport reads them.
 const readFileErrors = [
@@ -43,7 +43,7 @@ export class FilesApi extends HttpApi.make("files")
 	.add(
 		HttpApiGroup.make("bun")
 			.add(
-				HttpApiEndpoint.get("read", "/files/:name", {
+				HttpApiEndpoint.get("read", "/files/read/:name", {
 					params,
 					success,
 					error: readFileErrors,
@@ -54,7 +54,7 @@ export class FilesApi extends HttpApi.make("files")
 	.add(
 		HttpApiGroup.make("cpp")
 			.add(
-				HttpApiEndpoint.get("read", "/files/:name", {
+				HttpApiEndpoint.get("read", "/files/read/:name", {
 					params,
 					success,
 					error: [

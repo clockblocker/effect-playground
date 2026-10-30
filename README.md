@@ -47,8 +47,9 @@ procedure fail with `ReaderUnavailable`, as they do when the C++ process dies.
 Each reader has its own endpoint and procedure, so only the C++ ones declare
 `ReaderUnavailable`:
 
-- REST: `GET /api/bun/files/:name` and `GET /api/cpp/files/:name`, called as
-  `files.bun.read(…)` and `files.cpp.read(…)`.
+- REST: `GET /api/bun/files/read/:name` and
+  `GET /api/cpp/files/read/:name`, called as `files.bun.read(…)` and
+  `files.cpp.read(…)`.
 - RPC: `ReadFileBun({ name })` and `ReadFileCpp({ name })`, both over
   `POST /rpc`.
 
