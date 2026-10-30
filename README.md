@@ -9,6 +9,7 @@ isn't `.txt` fails with `NotTxtFile`; a missing `.txt` fails with
 ## Run
 
 ```sh
+bun install
 bun run dev
 ```
 
@@ -24,5 +25,5 @@ proxies `/api` and `/rpc` to it. `EFFECT_PLAYGROUND_PORT` and
   transports mounted on one router.
 - `src/client/` builds both clients and maps each outcome to UI state.
 
-`@effect/platform-node-shared` is pinned to 4.0.0 only to match the repo's
+`@effect/platform-node-shared` is pinned to 4.0.0 only to match
 `effect` 4.0.0. Its 4.1 release imports modules that effect 4.0 lacks.

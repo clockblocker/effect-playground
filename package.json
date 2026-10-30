@@ -1,39 +1,33 @@
 {
-	"name": "@texteater/effect-playground",
+	"name": "effect-playground",
 	"private": true,
 	"type": "module",
 	"packageManager": "bun@1.4.2",
-	"engines": {
-		"node": "24.x"
-	},
 	"scripts": {
-		"build": "turbo run build:package",
-		"build:package": "bun ../../tooling/manifest-policy.ts package && vite build",
-		"check": "bun ../../tooling/check-package-types.ts",
-		"dev": "turbo run dev:package",
-		"dev:package": "bun run --parallel dev:server dev:client",
+		"dev": "bun run --parallel dev:server dev:client",
 		"dev:server": "bun --watch src/server/main.ts",
 		"dev:client": "vite",
-		"fix": "bun run --silent biome check --write .",
-		"lint": "bun run --silent biome check --error-on-warnings .",
-		"test": "bun ../../tooling/run-package-tests.ts",
-		"knip": "bun ../../tooling/knip.ts",
-		"oxlint": "bun ../../tooling/oxlint.ts",
-		"validate": "bun ../../tooling/validate-package.ts",
-		"validate:imports": "bun ../../tooling/validate-repository-architecture.ts",
-		"validate:manifests": "bun ../../tooling/manifest-policy.ts repository"
+		"build": "vite build",
+		"check": "tsc -p tsconfig.json --noEmit",
+		"lint": "biome check --error-on-warnings .",
+		"fix": "biome check --write .",
+		"knip": "knip"
 	},
 	"dependencies": {
 		"@effect/platform-bun": "4.0.0",
 		"@effect/platform-node-shared": "4.0.0",
 		"effect": "4.0.0",
-		"react": "^19.2.6",
-		"react-dom": "^19.2.6"
+		"react": "^19.2.8",
+		"react-dom": "^19.2.8"
 	},
 	"devDependencies": {
-		"@types/react": "^19",
-		"@types/react-dom": "^19",
-		"@vitejs/plugin-react": "^6",
-		"vite": "^8"
+		"@biomejs/biome": "2.5.13",
+		"@types/react": "^19.2.18",
+		"@types/react-dom": "^19.2.4",
+		"@vitejs/plugin-react": "^6.0.5",
+		"bun-types": "1.4.2",
+		"knip": "^6.29.0",
+		"typescript": "^7.0.2",
+		"vite": "^8.1.5"
 	}
 }

@@ -1,9 +1,20 @@
 {
-	"extends": "../../tooling/typescript/base.json",
 	"compilerOptions": {
+		"allowImportingTsExtensions": true,
 		"jsx": "react-jsx",
 		"lib": ["ESNext", "DOM", "DOM.Iterable"],
-		"types": ["bun-types", "vite/client"]
+		"module": "Preserve",
+		"moduleDetection": "force",
+		"moduleResolution": "bundler",
+		"noEmit": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitOverride": true,
+		"noUncheckedIndexedAccess": true,
+		"skipLibCheck": true,
+		"strict": true,
+		"target": "ESNext",
+		"types": ["bun-types", "vite/client"],
+		"verbatimModuleSyntax": true
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
 }
