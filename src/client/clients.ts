@@ -3,7 +3,6 @@ import { FetchHttpClient, type HttpClientError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
 import type { ReaderUnavailable, ReadFileError } from "../shared/errors.ts";
-import type { Reader } from "../shared/reader.ts";
 import { FilesApi } from "../shared/rest-api.ts";
 import { FilesRpcs } from "../shared/rpc.ts";
 
@@ -11,15 +10,21 @@ import { FilesRpcs } from "../shared/rpc.ts";
 // page's own origin.
 const origin = window.location.origin;
 
-// The REST client behind a declared signature, so hovering `read` shows the
-// Effect instead of `MethodReturn<…>`. The compiler checks this type against
-// the generated client, so the two can't drift apart.
+// The REST client behind a declared signature, one method per reader, so
+// hovering `bun` or `cpp` shows the Effect instead of `MethodReturn<…>`. The
+// compiler checks this type against the generated client, so the two can't
+// drift apart.
 export class RestFiles extends Context.Service<
 	RestFiles,
 	{
-		readonly read: (
+		readonly bun: (
 			name: string,
-			reader: Reader,
+		) => Effect.Effect<
+			string,
+			ReadFileError | HttpClientError.HttpClientError | Schema.SchemaError
+		>;
+		readonly cpp: (
+			name: string,
 		) => Effect.Effect<
 			string,
 			| ReadFileError
@@ -35,17 +40,15 @@ export class RestFiles extends Context.Service<
 			HttpApiClient.make(FilesApi, { baseUrl: origin }),
 			(client) =>
 				RestFiles.of({
-					read: (name, reader) =>
-						client.files.read({
-							params: { name },
-							query: { reader },
-						}),
+					bun: (name) => client.files.bun({ params: { name } }),
+					cpp: (name) => client.files.cpp({ params: { name } }),
 				}),
 		),
 	);
 }
 
-// A client derived from the RPC contract: client.ReadFile({ name }).
+// A client derived from the RPC contract: client.ReadFileBun({ name }) and
+// client.ReadFileCpp({ name }).
 export class RpcFilesClient extends Context.Service<
 	RpcFilesClient,
 	RpcClient.FromGroup<typeof FilesRpcs, RpcClientError.RpcClientError>

@@ -3,31 +3,29 @@ import { type FormEvent, useId, useState } from "react";
 import type { Reader } from "../shared/reader.ts";
 import type { RestFiles, RpcFilesClient } from "./clients.ts";
 import { runtime } from "./clients.ts";
-import {
-	type Outcome,
-	readerLabels,
-	readViaRest,
-	readViaRpc,
-} from "./read-file.ts";
+import { type Outcome, readerLabels, rest, rpc } from "./read-file.ts";
 
 export function App() {
 	return (
 		<main className="panels">
-			<ReaderPanel title="REST" read={readViaRest} />
-			<ReaderPanel title="RPC" read={readViaRpc} />
+			<ReaderPanel title="REST" readers={rest} />
+			<ReaderPanel title="RPC" readers={rpc} />
 		</main>
 	);
 }
 
 function ReaderPanel({
 	title,
-	read,
+	readers,
 }: {
 	title: string;
-	read: (
-		name: string,
-		reader: Reader,
-	) => Effect.Effect<Outcome, never, RestFiles | RpcFilesClient>;
+	// One function per reader; the switch picks which one a submit calls.
+	readers: Record<
+		Reader,
+		(
+			name: string,
+		) => Effect.Effect<Outcome, never, RestFiles | RpcFilesClient>
+	>;
 }) {
 	const [name, setName] = useState("hello.txt");
 	const [reader, setReader] = useState<Reader>("bun");
@@ -38,7 +36,7 @@ function ReaderPanel({
 		event.preventDefault();
 		setPending(true);
 		// The error channel is `never`, so this promise only rejects on a defect.
-		setOutcome(await runtime.runPromise(read(name, reader)));
+		setOutcome(await runtime.runPromise(readers[reader](name)));
 		setPending(false);
 	}
 
@@ -62,7 +60,7 @@ function ReaderPanel({
 	);
 }
 
-const readers: readonly Reader[] = ["bun", "cpp"];
+const readerOrder: readonly Reader[] = ["bun", "cpp"];
 
 function ReaderSwitch({
 	value,
@@ -76,7 +74,7 @@ function ReaderSwitch({
 	return (
 		<fieldset className="reader-switch">
 			<legend className="visually-hidden">Reader</legend>
-			{readers.map((reader) => (
+			{readerOrder.map((reader) => (
 				<label key={reader}>
 					<input
 						type="radio"

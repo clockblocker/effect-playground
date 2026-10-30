@@ -1,18 +1,26 @@
 import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { FilesApi } from "../shared/rest-api.ts";
-import { FileReader } from "./file-reader.ts";
+import { BunReader } from "./bun-reader.ts";
+import { CppReader } from "./cpp-reader.ts";
 
 const FilesHandlers = HttpApiBuilder.group(
 	FilesApi,
 	"files",
 	Effect.fn(function* (handlers) {
-		const files = yield* FileReader;
-		return handlers.handle("read", ({ params, query }) =>
-			files
-				.read({ name: params.name, reader: query.reader })
-				.pipe(Effect.map(({ contents }) => contents)),
-		);
+		const bun = yield* BunReader;
+		const cpp = yield* CppReader;
+		return handlers
+			.handle("bun", ({ params }) =>
+				bun
+					.read(params.name)
+					.pipe(Effect.map(({ contents }) => contents)),
+			)
+			.handle("cpp", ({ params }) =>
+				cpp
+					.read(params.name)
+					.pipe(Effect.map(({ contents }) => contents)),
+			);
 	}),
 );
 

@@ -39,10 +39,16 @@ Stop `bun run dev` with Ctrl-C, which signals every process in it. `bun run`
 doesn't forward SIGTERM to its children: `kill <pid of bun run dev>` leaves
 the launcher, the Bun server and Vite running.
 
-`bun run dev:server` runs the Bun server alone; there, `reader: "cpp"` fails
-with `ReaderUnavailable`, as it does when the C++ process dies.
+`bun run dev:server` runs the Bun server alone; there, the C++ endpoint and
+procedure fail with `ReaderUnavailable`, as they do when the C++ process dies.
 
-REST: `GET /api/files/:name?reader=bun|cpp`. RPC: `ReadFile({ name, reader })`.
+Each reader has its own endpoint and procedure, so only the C++ ones declare
+`ReaderUnavailable`:
+
+- REST: `GET /api/bun/files/:name` and `GET /api/cpp/files/:name`, called as
+  `client.files.bun(…)` and `client.files.cpp(…)`.
+- RPC: `ReadFileBun({ name })` and `ReadFileCpp({ name })`, both over
+  `POST /rpc`.
 
 ## The reader protocol
 
@@ -82,9 +88,12 @@ The C++ integration tests skip when `cmake` isn't on the PATH.
 - `cpp/` is the C++ launcher and reader. `cpp/build/` is ignored.
 - `src/shared/` is the contract both sides import: the errors, the REST API,
   the RPC group, and the generated reader protocol.
-- `src/server/` holds `FileReader`, which routes each request to `BunReader`
-  or `CppReader`, and the two transports mounted on one router.
-- `src/client/` builds both clients and maps each outcome to UI state.
+- `src/server/` holds `BunReader` and `CppReader`, and the two transports
+  mounted on one router; each handler calls the reader its endpoint names.
+- `src/client/` builds both clients and maps each outcome to UI state, with
+  one function per transport and reader (`rest.bun`, `rpc.cpp`, …).
+- `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
+  `bun run check` runs.
 - `scripts/` builds the C++ and runs the code generator.
 
 `@effect/platform-node-shared` is pinned to 4.0.0 only to match

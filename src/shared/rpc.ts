@@ -5,13 +5,18 @@ import {
 	ReadFileRequest,
 	ReadFileSuccess,
 } from "./generated/reader-protocol.ts";
-import { Reader } from "./reader.ts";
 
-// One procedure, no URL design: every call is a POST to /rpc carrying
-// { tag: "ReadFile", payload: { name, reader } }.
+// One procedure per reader, no URL design: every call is a POST to /rpc
+// carrying { tag: "ReadFileBun" | "ReadFileCpp", payload: { name } }. Only the
+// C++ one can fail with ReaderUnavailable.
 export class FilesRpcs extends RpcGroup.make(
-	Rpc.make("ReadFile", {
-		payload: { ...ReadFileRequest.fields, reader: Reader },
+	Rpc.make("ReadFileBun", {
+		payload: ReadFileRequest,
+		success: ReadFileSuccess,
+		error: ReadFileError,
+	}),
+	Rpc.make("ReadFileCpp", {
+		payload: ReadFileRequest,
 		success: ReadFileSuccess,
 		error: Schema.Union([ReadFileError, ReaderUnavailable]),
 	}),

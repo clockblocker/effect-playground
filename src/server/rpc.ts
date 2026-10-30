@@ -1,13 +1,16 @@
 import { Effect, Layer } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { FilesRpcs } from "../shared/rpc.ts";
-import { FileReader } from "./file-reader.ts";
+import { BunReader } from "./bun-reader.ts";
+import { CppReader } from "./cpp-reader.ts";
 
 const FilesHandlers = FilesRpcs.toLayer(
 	Effect.gen(function* () {
-		const files = yield* FileReader;
+		const bun = yield* BunReader;
+		const cpp = yield* CppReader;
 		return FilesRpcs.of({
-			ReadFile: (request) => files.read(request),
+			ReadFileBun: ({ name }) => bun.read(name),
+			ReadFileCpp: ({ name }) => cpp.read(name),
 		});
 	}),
 );
