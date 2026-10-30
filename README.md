@@ -79,6 +79,8 @@ error for it. Each boundary rejects it:
 - RPC: the client can't encode the payload and dies before sending. A raw
   request gets an `Exit` whose cause is a `Die` with the schema's message.
 - C++: reflect-cpp can't parse the params, and the reader answers with a `Die`.
+- The page: each panel's react-hook-form validates against the same field, so
+  it shows the message under the input and never sends the request.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
 re-emits the schema and regenerates the TypeScript. Both outputs are
@@ -107,7 +109,9 @@ The C++ integration tests skip when `cmake` isn't on the PATH.
 - `src/server/` holds `BunReader` and `CppReader`, and the two transports
   mounted on one router; each handler calls the reader its endpoint names.
 - `src/client/` builds both clients and maps each outcome to UI state, with
-  one function per transport and reader (`rest.bun`, `rpc.cpp`, …).
+  one function per transport and reader (`rest.bun`, `rpc.cpp`, …). `App`
+  builds the form schema from the generated `ReadFileRequest` plus `Reader`,
+  and passes it to each panel, whose react-hook-form resolver uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
   `bun run check` runs.
 - `scripts/` builds the C++ and runs the code generator.

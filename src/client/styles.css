@@ -14,6 +14,7 @@
 
 .panel form {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 0.5rem;
 }
 
@@ -35,8 +36,15 @@
 	background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
-.panel [role="alert"] {
+.panel [role="alert"],
+.panel .field-error {
 	color: #c62828;
+}
+
+/* Its own line in the form, under the input. */
+.panel .field-error {
+	flex-basis: 100%;
+	margin: 0;
 }
 
 .visually-hidden {
