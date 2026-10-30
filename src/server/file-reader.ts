@@ -1,9 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import type {
-	FileNotFound,
-	NotTxtFile,
-	ReaderUnavailable,
-} from "../shared/errors.ts";
+import type { ReaderUnavailable, ReadFileError } from "../shared/errors.ts";
 import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
 import type { Reader } from "../shared/reader.ts";
 import { BunReader } from "./bun-reader.ts";
@@ -17,10 +13,7 @@ export class FileReader extends Context.Service<
 		readonly read: (request: {
 			readonly name: string;
 			readonly reader: Reader;
-		}) => Effect.Effect<
-			ReadFileSuccess,
-			NotTxtFile | FileNotFound | ReaderUnavailable
-		>;
+		}) => Effect.Effect<ReadFileSuccess, ReadFileError | ReaderUnavailable>;
 	}
 >()("effect-playground/FileReader") {
 	static readonly layer = Layer.effect(

@@ -1,11 +1,7 @@
 import { BunSocket } from "@effect/platform-bun";
 import { Config, Context, Effect, Layer, Option } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
-import {
-	type FileNotFound,
-	type NotTxtFile,
-	ReaderUnavailable,
-} from "../shared/errors.ts";
+import { ReaderUnavailable, type ReadFileError } from "../shared/errors.ts";
 import {
 	ReaderProtocol,
 	type ReadFileSuccess,
@@ -22,10 +18,7 @@ export class CppReader extends Context.Service<
 	{
 		readonly read: (
 			name: string,
-		) => Effect.Effect<
-			ReadFileSuccess,
-			NotTxtFile | FileNotFound | ReaderUnavailable
-		>;
+		) => Effect.Effect<ReadFileSuccess, ReadFileError | ReaderUnavailable>;
 	}
 >()("effect-playground/CppReader") {
 	static readonly layer = Layer.unwrap(

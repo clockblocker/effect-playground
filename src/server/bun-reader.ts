@@ -1,5 +1,9 @@
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import { FileNotFound, NotTxtFile } from "../shared/errors.ts";
+import {
+	FileNotFound,
+	NotTxtFile,
+	type ReadFileError,
+} from "../shared/errors.ts";
 import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
 
 // The Bun reader: the file system through Effect. Its C++ twin is
@@ -9,7 +13,7 @@ export class BunReader extends Context.Service<
 	{
 		readonly read: (
 			name: string,
-		) => Effect.Effect<ReadFileSuccess, NotTxtFile | FileNotFound>;
+		) => Effect.Effect<ReadFileSuccess, ReadFileError>;
 	}
 >()("effect-playground/BunReader") {
 	static readonly layer = Layer.effect(

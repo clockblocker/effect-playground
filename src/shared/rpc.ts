@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { FileNotFound, NotTxtFile, ReaderUnavailable } from "./errors.ts";
+import { ReaderUnavailable, ReadFileError } from "./errors.ts";
 import {
 	ReadFileRequest,
 	ReadFileSuccess,
@@ -13,6 +13,6 @@ export class FilesRpcs extends RpcGroup.make(
 	Rpc.make("ReadFile", {
 		payload: { ...ReadFileRequest.fields, reader: Reader },
 		success: ReadFileSuccess,
-		error: Schema.Union([NotTxtFile, FileNotFound, ReaderUnavailable]),
+		error: Schema.Union([ReadFileError, ReaderUnavailable]),
 	}),
 ) {}

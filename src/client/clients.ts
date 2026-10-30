@@ -2,11 +2,7 @@ import { Context, Effect, Layer, ManagedRuntime, type Schema } from "effect";
 import { FetchHttpClient, type HttpClientError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
-import type {
-	FileNotFound,
-	NotTxtFile,
-	ReaderUnavailable,
-} from "../shared/errors.ts";
+import type { ReaderUnavailable, ReadFileError } from "../shared/errors.ts";
 import type { Reader } from "../shared/reader.ts";
 import { FilesApi } from "../shared/rest-api.ts";
 import { FilesRpcs } from "../shared/rpc.ts";
@@ -26,8 +22,7 @@ export class RestFiles extends Context.Service<
 			reader: Reader,
 		) => Effect.Effect<
 			string,
-			| NotTxtFile
-			| FileNotFound
+			| ReadFileError
 			| ReaderUnavailable
 			| HttpClientError.HttpClientError
 			| Schema.SchemaError
