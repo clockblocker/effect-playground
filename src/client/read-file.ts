@@ -8,8 +8,8 @@ import { RestFiles, RpcFilesClient } from "./clients.ts";
 // ReaderUnavailable: hover one to see it.
 
 export const rest = {
-	bun: (name: string) => RestFiles.use((files) => files.bun(name)),
-	cpp: (name: string) => RestFiles.use((files) => files.cpp(name)),
+	bun: (name: string) => RestFiles.use((files) => files.bun.read(name)),
+	cpp: (name: string) => RestFiles.use((files) => files.cpp.read(name)),
 };
 
 // RPC answers with the success struct; its contents make it look like REST.

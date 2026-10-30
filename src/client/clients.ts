@@ -1,9 +1,7 @@
-import { Context, Effect, Layer, ManagedRuntime, type Schema } from "effect";
-import { FetchHttpClient, type HttpClientError } from "effect/http";
+import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
-import type { ReadFile } from "../shared/generated/reader-protocol.ts";
-import type { ReaderUnavailable } from "../shared/reader-unavailable.ts";
 import { FilesApi } from "../shared/rest-api.ts";
 import { FilesRpcs } from "../shared/rpc.ts";
 
@@ -11,31 +9,31 @@ import { FilesRpcs } from "../shared/rpc.ts";
 // page's own origin.
 const origin = window.location.origin;
 
-// The REST client behind a declared signature, one method per reader, so
-// hovering `bun` or `cpp` shows the Effect instead of `MethodReturn<…>`. The
-// compiler checks this type against the generated client, so the two can't
-// drift apart.
+// Re-states an Effect by its three parts, so it prints as Effect<…> rather
+// than as the alias HttpApiClient computes it through (MethodReturn<…>).
+type Plain<T> =
+	T extends Effect.Effect<infer A, infer E, infer R>
+		? Effect.Effect<A, E, R>
+		: never;
+
+// One reader per endpoint of a group, each read by file name. The errors are
+// the endpoint's own (from the contract) plus the client's transport errors,
+// all inferred, so nothing here restates them.
+type Readers<Group> = {
+	readonly [Reader in keyof Group]: {
+		readonly read: (
+			name: string,
+		) => Group[Reader] extends (...args: never) => infer Out
+			? Plain<Out>
+			: never;
+	};
+};
+
+// The REST client as files.bun.read(name) and files.cpp.read(name). A reader
+// added to the contract fails RestFiles.of below until it is wired up.
 export class RestFiles extends Context.Service<
 	RestFiles,
-	{
-		readonly bun: (
-			name: string,
-		) => Effect.Effect<
-			string,
-			| ReadFile.Failure
-			| HttpClientError.HttpClientError
-			| Schema.SchemaError
-		>;
-		readonly cpp: (
-			name: string,
-		) => Effect.Effect<
-			string,
-			| ReadFile.Failure
-			| ReaderUnavailable
-			| HttpClientError.HttpClientError
-			| Schema.SchemaError
-		>;
-	}
+	Readers<HttpApiClient.ForApi<typeof FilesApi>["files"]>
 >()("effect-playground/RestFiles") {
 	static readonly layer = Layer.effect(
 		RestFiles,
@@ -43,8 +41,12 @@ export class RestFiles extends Context.Service<
 			HttpApiClient.make(FilesApi, { baseUrl: origin }),
 			(client) =>
 				RestFiles.of({
-					bun: (name) => client.files.bun({ params: { name } }),
-					cpp: (name) => client.files.cpp({ params: { name } }),
+					bun: {
+						read: (name) => client.files.bun({ params: { name } }),
+					},
+					cpp: {
+						read: (name) => client.files.cpp({ params: { name } }),
+					},
 				}),
 		),
 	);
