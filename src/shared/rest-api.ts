@@ -8,14 +8,29 @@ import {
 import { ReadFile } from "./generated/reader-protocol.ts";
 import { ReaderUnavailable } from "./reader-unavailable.ts";
 
+// HttpApiSchema.status keeps what a schema decodes to and from, but Effect
+// types the annotated schema by its internals (decodeTo<declareConstructor…>),
+// so hovers turn unreadable. This names just what is kept.
+const withStatus =
+	(code: number) =>
+	<S extends Schema.Top>(
+		self: S,
+	): Schema.Codec<
+		S["Type"],
+		S["Encoded"],
+		S["DecodingServices"],
+		S["EncodingServices"]
+	> =>
+		self.pipe(HttpApiSchema.status(code));
+
 // One endpoint per reader, so each declares only the errors it can return:
 // GET /api/bun/files/:name → 200 text/plain, 415 NotTxtFile, 404 FileNotFound;
 // GET /api/cpp/files/:name → the same, plus 503 ReaderUnavailable. The
 // statuses are attached here, because the errors are shared with RPC and the
 // C++ protocol, and only this transport reads them.
 const readFileErrors = [
-	ReadFile.NotTxtFile.pipe(HttpApiSchema.status(415)),
-	ReadFile.FileNotFound.pipe(HttpApiSchema.status(404)),
+	ReadFile.NotTxtFile.pipe(withStatus(415)),
+	ReadFile.FileNotFound.pipe(withStatus(404)),
 ] as const;
 
 // The generated field, so a name the C++ protocol rejects (too short, too
@@ -36,7 +51,7 @@ export class FilesApi extends HttpApi.make("files-api").add(
 				success,
 				error: [
 					...readFileErrors,
-					ReaderUnavailable.pipe(HttpApiSchema.status(503)),
+					ReaderUnavailable.pipe(withStatus(503)),
 				],
 			}),
 		)
