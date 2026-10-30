@@ -1,43 +1,35 @@
-import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import { FileNotFound, NotTxtFile } from "../shared/errors.ts";
+import { Context, Effect, Layer } from "effect";
+import type {
+	FileNotFound,
+	NotTxtFile,
+	ReaderUnavailable,
+} from "../shared/errors.ts";
+import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
+import type { Reader } from "../shared/reader.ts";
+import { BunReader } from "./bun-reader.ts";
+import { CppReader } from "./cpp-reader.ts";
 
-// The business logic, written once. Both transports call this service and
-// know nothing about the file system.
+// What both transports call: it routes each request to the reader it names,
+// and knows nothing about the file system or the wire.
 export class FileReader extends Context.Service<
 	FileReader,
 	{
-		readonly read: (
-			name: string,
-		) => Effect.Effect<string, NotTxtFile | FileNotFound>;
+		readonly read: (request: {
+			readonly name: string;
+			readonly reader: Reader;
+		}) => Effect.Effect<
+			ReadFileSuccess,
+			NotTxtFile | FileNotFound | ReaderUnavailable
+		>;
 	}
 >()("effect-playground/FileReader") {
 	static readonly layer = Layer.effect(
 		FileReader,
 		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem;
-			const path = yield* Path.Path;
-			const directory = path.join(import.meta.dirname, "../../files");
-
-			const read = Effect.fn("FileReader.read")(function* (name: string) {
-				if (path.extname(name) !== ".txt") {
-					return yield* new NotTxtFile({ name });
-				}
-				// basename keeps "../../etc/passwd.txt" inside the files folder.
-				return yield* fs
-					.readFileString(path.join(directory, path.basename(name)))
-					.pipe(
-						Effect.catchReason(
-							"PlatformError",
-							"NotFound",
-							() => Effect.fail(new FileNotFound({ name })),
-							// Any other reason (permissions, a directory named x.txt) is
-							// a bug, not a case the client handles: make it a defect.
-							Effect.die,
-						),
-					);
+			const readers = { bun: yield* BunReader, cpp: yield* CppReader };
+			return FileReader.of({
+				read: ({ name, reader }) => readers[reader].read(name),
 			});
-
-			return FileReader.of({ read });
 		}),
-	);
+	).pipe(Layer.provide([BunReader.layer, CppReader.layer]));
 }

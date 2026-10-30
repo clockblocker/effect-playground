@@ -38,3 +38,50 @@
 .panel [role="alert"] {
 	color: #c62828;
 }
+
+.visually-hidden {
+	position: absolute;
+	inline-size: 1px;
+	block-size: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.reader-switch {
+	display: flex;
+	margin: 0;
+	padding: 0;
+	border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+	border-radius: 0.4rem;
+	overflow: hidden;
+}
+
+.reader-switch label {
+	position: relative;
+	display: flex;
+	align-items: center;
+	padding-inline: 0.75rem;
+	cursor: pointer;
+}
+
+.reader-switch label + label {
+	border-inline-start: 1px solid
+		color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.reader-switch label:has(:checked) {
+	background: color-mix(in srgb, currentColor 14%, transparent);
+	font-weight: 600;
+}
+
+.reader-switch label:has(:focus-visible) {
+	outline: 2px solid Highlight;
+	outline-offset: -2px;
+}
+
+.reader-switch input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}

@@ -1,13 +1,18 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { FileNotFound, NotTxtFile } from "./errors.ts";
+import { FileNotFound, NotTxtFile, ReaderUnavailable } from "./errors.ts";
+import {
+	ReadFileRequest,
+	ReadFileSuccess,
+} from "./generated/reader-protocol.ts";
+import { Reader } from "./reader.ts";
 
 // One procedure, no URL design: every call is a POST to /rpc carrying
-// { tag: "ReadFile", payload: { name } }.
+// { tag: "ReadFile", payload: { name, reader } }.
 export class FilesRpcs extends RpcGroup.make(
 	Rpc.make("ReadFile", {
-		payload: { name: Schema.String },
-		success: Schema.String,
-		error: Schema.Union([NotTxtFile, FileNotFound]),
+		payload: { ...ReadFileRequest.fields, reader: Reader },
+		success: ReadFileSuccess,
+		error: Schema.Union([NotTxtFile, FileNotFound, ReaderUnavailable]),
 	}),
 ) {}

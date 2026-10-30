@@ -7,9 +7,11 @@ const FilesHandlers = HttpApiBuilder.group(
 	FilesApi,
 	"files",
 	Effect.fn(function* (handlers) {
-		const reader = yield* FileReader;
-		return handlers.handle("read", ({ params }) =>
-			reader.read(params.name),
+		const files = yield* FileReader;
+		return handlers.handle("read", ({ params, query }) =>
+			files
+				.read({ name: params.name, reader: query.reader })
+				.pipe(Effect.map(({ contents }) => contents)),
 		);
 	}),
 );

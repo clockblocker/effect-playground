@@ -5,9 +5,9 @@ import { FileReader } from "./file-reader.ts";
 
 const FilesHandlers = FilesRpcs.toLayer(
 	Effect.gen(function* () {
-		const reader = yield* FileReader;
+		const files = yield* FileReader;
 		return FilesRpcs.of({
-			ReadFile: ({ name }) => reader.read(name),
+			ReadFile: (request) => files.read(request),
 		});
 	}),
 );
