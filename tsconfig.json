@@ -16,5 +16,11 @@
 		"types": ["bun-types", "vite/client"],
 		"verbatimModuleSyntax": true
 	},
-	"include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"scripts/**/*.ts",
+		"test/**/*.ts",
+		"vite.config.ts"
+	]
 }

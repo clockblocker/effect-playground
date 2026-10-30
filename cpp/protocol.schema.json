@@ -1,0 +1,94 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/reader_protocol__ReadFile",
+    "$defs": {
+        "reader_protocol__FileNotFound__tagged": {
+            "type": "object",
+            "properties": {
+                "_tag": {
+                    "type": "string",
+                    "enum": [
+                        "FileNotFound"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The requested name; no such .txt file exists."
+                }
+            },
+            "required": [
+                "_tag",
+                "name"
+            ]
+        },
+        "reader_protocol__NotTxtFile__tagged": {
+            "type": "object",
+            "properties": {
+                "_tag": {
+                    "type": "string",
+                    "enum": [
+                        "NotTxtFile"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The requested name, which does not end in .txt."
+                }
+            },
+            "required": [
+                "_tag",
+                "name"
+            ]
+        },
+        "reader_protocol__ReadFile": {
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "$ref": "#/$defs/reader_protocol__ReadFileRequest"
+                },
+                "success": {
+                    "$ref": "#/$defs/reader_protocol__ReadFileSuccess"
+                },
+                "error": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/reader_protocol__NotTxtFile__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/reader_protocol__FileNotFound__tagged"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "payload",
+                "success",
+                "error"
+            ]
+        },
+        "reader_protocol__ReadFileRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The file to read, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory."
+                }
+            },
+            "required": [
+                "name"
+            ]
+        },
+        "reader_protocol__ReadFileSuccess": {
+            "type": "object",
+            "properties": {
+                "contents": {
+                    "type": "string",
+                    "description": "The whole file, decoded as UTF-8."
+                }
+            },
+            "required": [
+                "contents"
+            ]
+        }
+    }
+}

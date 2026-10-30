@@ -1,4 +1,4 @@
 {
-	"entry": ["src/server/main.ts"],
+	"entry": ["src/server/main.ts", "scripts/*.ts", "test/**/*.test.ts"],
 	"ignoreDependencies": ["@effect/platform-node-shared"]
 }

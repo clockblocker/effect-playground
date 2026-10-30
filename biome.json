@@ -6,7 +6,13 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!!dist", "!!node_modules", "!!bun.lock"]
+		"includes": [
+			"**",
+			"!!dist",
+			"!!node_modules",
+			"!!bun.lock",
+			"!!cpp/protocol.schema.json"
+		]
 	},
 	"formatter": {
 		"enabled": true,
