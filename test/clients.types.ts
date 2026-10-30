@@ -2,7 +2,7 @@
 // the C++ calls can fail with ReaderUnavailable, over REST and over RPC.
 import type { Effect } from "effect";
 import type { rest, rpc } from "../src/client/read-file.ts";
-import type { ReaderUnavailable } from "../src/shared/errors.ts";
+import type { ReaderUnavailable } from "../src/shared/reader-unavailable.ts";
 
 type FailsWith<Call, E> = Call extends (
 	...args: never[]

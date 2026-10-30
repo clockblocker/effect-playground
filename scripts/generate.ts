@@ -1,8 +1,9 @@
 // Runs the protocol pipeline: C++ structs → reflect-cpp → JSON Schema →
-// Effect Schema TypeScript. With --check, writes nothing and fails if either
-// committed artifact is stale.
+// Effect Schema TypeScript. With --check, writes nothing and fails if any
+// committed artifact is stale, or if src/shared/generated/ holds a file the
+// generator no longer writes.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { buildCpp } from "./cpp.ts";
 import { emit } from "./reader-protocol/emit.ts";
@@ -10,7 +11,7 @@ import { normalize } from "./reader-protocol/normalize.ts";
 
 const root = join(import.meta.dir, "..");
 const schemaPath = join(root, "cpp/protocol.schema.json");
-const modulePath = join(root, "src/shared/generated/reader-protocol.ts");
+const generated = join(root, "src/shared/generated");
 const check = process.argv.includes("--check");
 
 const header = [
@@ -23,29 +24,41 @@ const binary = buildCpp();
 const emitted = Bun.spawnSync([binary, "--emit-schema"], { stderr: "inherit" });
 if (emitted.exitCode !== 0) throw new Error("--emit-schema failed");
 const schema = emitted.stdout.toString();
-const module = format(emit(normalize(JSON.parse(schema)), header));
+const modules = emit(normalize(JSON.parse(schema)), header);
 
 const artifacts: ReadonlyArray<readonly [string, string]> = [
 	[schemaPath, schema],
-	[modulePath, module],
+	...[...modules].map(([file, source]) => {
+		const path = join(generated, file);
+		return [path, format(source, path)] as const;
+	}),
 ];
+const leftovers = readdirSync(generated)
+	.map((file) => join(generated, file))
+	.filter((path) => !artifacts.some(([artifact]) => artifact === path));
 if (check) {
 	const stale = artifacts.filter(([path, text]) => read(path) !== text);
 	for (const [path] of stale) {
 		console.error(`${relative(root, path)} is stale; run bun run generate`);
 	}
-	process.exitCode = stale.length > 0 ? 1 : 0;
+	for (const path of leftovers) {
+		console.error(
+			`${relative(root, path)} isn't generated anymore; run bun run generate`,
+		);
+	}
+	process.exitCode = stale.length + leftovers.length > 0 ? 1 : 0;
 } else {
 	for (const [path, text] of artifacts) writeFileSync(path, text);
+	for (const path of leftovers) rmSync(path);
 }
 
-function format(source: string): string {
+function format(source: string, path: string): string {
 	const result = Bun.spawnSync(
 		[
 			join(root, "node_modules/.bin/biome"),
 			"check",
 			"--write",
-			`--stdin-file-path=${modulePath}`,
+			`--stdin-file-path=${path}`,
 		],
 		{ cwd: root, stdin: Buffer.from(source), stderr: "inherit" },
 	);

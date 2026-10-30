@@ -1,10 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import {
-	FileNotFound,
-	NotTxtFile,
-	type ReadFileError,
-} from "../shared/errors.ts";
-import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
+import { ReadFile } from "../shared/generated/reader-protocol.ts";
 
 // The Bun reader: the file system through Effect. Its C++ twin is
 // cpp/src/read_file.cpp.
@@ -13,7 +8,7 @@ export class BunReader extends Context.Service<
 	{
 		readonly read: (
 			name: string,
-		) => Effect.Effect<ReadFileSuccess, ReadFileError>;
+		) => Effect.Effect<ReadFile.Success, ReadFile.Error>;
 	}
 >()("effect-playground/BunReader") {
 	static readonly layer = Layer.effect(
@@ -25,7 +20,7 @@ export class BunReader extends Context.Service<
 
 			const read = Effect.fn("BunReader.read")(function* (name: string) {
 				if (path.extname(name) !== ".txt") {
-					return yield* new NotTxtFile({ file: name });
+					return yield* new ReadFile.NotTxtFile({ file: name });
 				}
 				// basename keeps "../../etc/passwd.txt" inside the files folder.
 				const contents = yield* fs
@@ -34,7 +29,10 @@ export class BunReader extends Context.Service<
 						Effect.catchReason(
 							"PlatformError",
 							"NotFound",
-							() => Effect.fail(new FileNotFound({ file: name })),
+							() =>
+								Effect.fail(
+									new ReadFile.FileNotFound({ file: name }),
+								),
 							// Any other reason (permissions, a directory named x.txt) is
 							// a bug, not a case the client handles: make it a defect.
 							Effect.die,

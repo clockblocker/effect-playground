@@ -2,63 +2,16 @@
 // reflect-cpp emits from the structs in cpp/include/reader_protocol.hpp.
 // Don't edit: change the C++ structs and run `bun run generate`.
 
-import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
+import * as ReadFile from "./read-file.ts";
 
-export const ReadFileRequest = Schema.Struct({
-	/**
-	 * The file to read, such as "hello.txt". Only its base name is used, so a
-	 * request never leaves the files directory.
-	 */
-	name: Schema.String.check(
-		Schema.isMinCodePoints(5, {
-			message: "Must be at least 5 characters long",
-		}),
-		Schema.isMaxCodePoints(25, {
-			message: "Must be at most 25 characters long",
-		}),
-	),
-});
-export interface ReadFileRequest
-	extends Schema.Schema.Type<typeof ReadFileRequest> {}
-
-export const ReadFileSuccess = Schema.Struct({
-	/** The whole file, decoded as UTF-8. */
-	contents: Schema.String,
-});
-export interface ReadFileSuccess
-	extends Schema.Schema.Type<typeof ReadFileSuccess> {}
-
-export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()("NotTxtFile", {
-	/** The requested name, which does not end in .txt. */
-	file: Schema.String,
-}) {
-	override get message(): string {
-		return `"${this.file}" is not a .txt file`;
-	}
-}
-
-export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
-	"FileNotFound",
-	{
-		/** The requested name; no such .txt file exists. */
-		file: Schema.String,
-	},
-) {
-	override get message(): string {
-		return `"${this.file}" does not exist`;
-	}
-}
-
-/** Every error ReadFile can fail with. */
-export const ReadFileError = Schema.Union([NotTxtFile, FileNotFound]);
-export type ReadFileError = typeof ReadFileError.Type;
+export { ReadFile };
 
 /** The C++ reader's procedures, for an Effect RPC client over JSON-RPC. */
 export class ReaderProtocol extends RpcGroup.make(
 	Rpc.make("ReadFile", {
-		payload: ReadFileRequest,
-		success: ReadFileSuccess,
-		error: ReadFileError,
+		payload: ReadFile.Request,
+		success: ReadFile.Success,
+		error: ReadFile.Error,
 	}),
 ) {}

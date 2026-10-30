@@ -1,11 +1,11 @@
 import { BunSocket } from "@effect/platform-bun";
 import { Config, Context, Effect, Layer, Option } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
-import { ReaderUnavailable, type ReadFileError } from "../shared/errors.ts";
 import {
 	ReaderProtocol,
-	type ReadFileSuccess,
+	type ReadFile,
 } from "../shared/generated/reader-protocol.ts";
+import { ReaderUnavailable } from "../shared/reader-unavailable.ts";
 
 const unavailable = (detail: string) => new ReaderUnavailable({ detail });
 
@@ -17,7 +17,10 @@ export class CppReader extends Context.Service<
 	{
 		readonly read: (
 			name: string,
-		) => Effect.Effect<ReadFileSuccess, ReadFileError | ReaderUnavailable>;
+		) => Effect.Effect<
+			ReadFile.Success,
+			ReadFile.Error | ReaderUnavailable
+		>;
 	}
 >()("effect-playground/CppReader") {
 	static readonly layer = Layer.unwrap(

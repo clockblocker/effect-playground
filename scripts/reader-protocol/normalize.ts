@@ -17,17 +17,17 @@ export interface Definition {
 }
 
 /** The root struct: a procedure, never sent, naming what it takes and returns. */
-interface Procedure {
+export interface Procedure {
 	readonly name: string;
-	/** The C++ namespace, such as `reader_protocol`. */
-	readonly namespace: string;
 	readonly payload: string;
 	readonly success: string;
 	readonly errors: readonly string[];
 }
 
 export interface Protocol {
-	readonly procedure: Procedure;
+	/** The C++ namespace, such as `reader_protocol`. */
+	readonly namespace: string;
+	readonly procedures: readonly Procedure[];
 	readonly definitions: ReadonlyMap<string, Definition>;
 }
 
@@ -131,13 +131,15 @@ export function normalize(document: unknown): Protocol {
 
 	definitions.delete(root.name);
 	return {
-		procedure: {
-			name: root.name,
-			namespace: root.namespace,
-			payload: refName(field("payload"), "payload"),
-			success: refName(field("success"), "success"),
-			errors,
-		},
+		namespace: root.namespace,
+		procedures: [
+			{
+				name: root.name,
+				payload: refName(field("payload"), "payload"),
+				success: refName(field("success"), "success"),
+				errors,
+			},
+		],
 		definitions,
 	};
 }

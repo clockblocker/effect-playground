@@ -2,7 +2,7 @@ import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { Effect, Result, Schema } from "effect";
 import { useId, useMemo, useState } from "react";
 import { type UseFormRegisterReturn, useForm } from "react-hook-form";
-import { ReadFileRequest } from "../shared/generated/reader-protocol.ts";
+import { ReadFile } from "../shared/generated/reader-protocol.ts";
 import { Reader } from "../shared/reader.ts";
 import type { RestFiles, RpcFilesClient } from "./clients.ts";
 import { runtime } from "./clients.ts";
@@ -11,7 +11,7 @@ import { describeFailure, type ReadFailure, rest, rpc } from "./read-file.ts";
 // What a panel's form holds: the generated request, so the 5–25 rule and its
 // messages come from the C++ struct, plus which reader to send it to.
 const ReadFileForm = Schema.Struct({
-	...ReadFileRequest.fields,
+	...ReadFile.Request.fields,
 	reader: Reader,
 });
 type ReadFileForm = typeof ReadFileForm;

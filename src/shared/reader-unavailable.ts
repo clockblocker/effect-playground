@@ -1,14 +1,5 @@
 import { Schema } from "effect";
 
-// Errors are schemas, so they cross the wire and arrive on the client as the
-// same classes. NotTxtFile and FileNotFound come from the C++ protocol, so the
-// Bun and C++ readers fail with one definition of each.
-export {
-	FileNotFound,
-	NotTxtFile,
-	ReadFileError,
-} from "./generated/reader-protocol.ts";
-
 /**
  * The Bun server couldn't reach the C++ reader: it isn't running, or the
  * server was started without it. Only the C++ endpoint and procedure fail

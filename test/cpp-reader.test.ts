@@ -3,7 +3,7 @@ import type { Subprocess } from "bun";
 import { Effect } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
 import { CppReader } from "../src/server/cpp-reader.ts";
-import { FileNotFound, NotTxtFile } from "../src/shared/errors.ts";
+import { ReadFile } from "../src/shared/generated/reader-protocol.ts";
 
 const files = new URL("../files", import.meta.url).pathname;
 
@@ -126,10 +126,10 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 	test("the Effect RPC client gets NotTxtFile as its class", async () => {
 		const result = await read("config.json");
 		expect(result._tag === "Failure" && result.failure).toEqual(
-			new NotTxtFile({ file: "config.json" }),
+			new ReadFile.NotTxtFile({ file: "config.json" }),
 		);
 		expect(result._tag === "Failure" && result.failure).toBeInstanceOf(
-			NotTxtFile,
+			ReadFile.NotTxtFile,
 		);
 		expect(result._tag === "Failure" && result.failure.message).toBe(
 			'"config.json" is not a .txt file',
@@ -139,7 +139,7 @@ describe.skipIf(Bun.which("cmake") === null)("C++ reader", () => {
 	test("the Effect RPC client gets FileNotFound as its class", async () => {
 		const result = await read("missing.txt");
 		expect(result._tag === "Failure" && result.failure).toBeInstanceOf(
-			FileNotFound,
+			ReadFile.FileNotFound,
 		);
 	});
 });

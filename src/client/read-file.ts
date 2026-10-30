@@ -1,5 +1,5 @@
 import { Effect, Match } from "effect";
-import type { ReadFileSuccess } from "../shared/generated/reader-protocol.ts";
+import type { ReadFile } from "../shared/generated/reader-protocol.ts";
 import type { Reader } from "../shared/reader.ts";
 import { RestFiles, RpcFilesClient } from "./clients.ts";
 
@@ -13,7 +13,7 @@ export const rest = {
 };
 
 // RPC answers with the success struct; its contents make it look like REST.
-const contents = (success: ReadFileSuccess) => success.contents;
+const contents = (success: ReadFile.Success) => success.contents;
 
 export const rpc = {
 	bun: (name: string) =>

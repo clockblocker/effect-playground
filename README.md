@@ -61,12 +61,17 @@ wire between Bun and C++: the request, the success and the two errors.
    `effect-playground-cpp --emit-schema` writes `cpp/protocol.schema.json`,
    adding each error's message template as `x-message`.
 2. `scripts/generate.ts` turns that into Effect Schema in
-   `src/shared/generated/reader-protocol.ts`: a `Schema.TaggedError` per error
-   with a `message` getter, a struct and type per message, and the
-   `ReaderProtocol` RPC group.
-3. Both readers fail with those error classes; `src/shared/errors.ts`
-   re-exports them, and `src/shared/rest-api.ts` gives them their HTTP
-   statuses.
+   `src/shared/generated/`: one module per method, `read-file.ts`, and an
+   index, `reader-protocol.ts`, that exports it as the namespace `ReadFile`
+   next to the `ReaderProtocol` RPC group. `ReadFile.Request`,
+   `ReadFile.Success` and `ReadFile.Error` are the payload, the success and
+   the error union, and `ReadFile.NotTxtFile` and `ReadFile.FileNotFound` the
+   `Schema.TaggedError` classes, each with a `message` getter. The module
+   declares `ReadFileSuccess` and exports it as `Success`, so a hover still
+   says `ReadFileSuccess`. A struct two methods share would have no module,
+   so the generator fails on one.
+3. Both readers fail with those error classes, and `src/shared/rest-api.ts`
+   gives them their HTTP statuses.
 
 Each error's sentence lives on its C++ struct, as
 `static constexpr std::string_view message = "\"{file}\" is not a .txt file"`.
@@ -78,7 +83,7 @@ template for the `message` of its JSON-RPC error. The generator fails on an
 error without a template, on a `{field}` the struct doesn't have, and on a
 field named `name`, `message`, `stack` or `cause`, which would shadow the
 `Error`'s own. `ReaderUnavailable` is the Bun server's, so its sentence lives
-in `src/shared/errors.ts`; the client's transport errors get their wording in
+in `src/shared/reader-unavailable.ts`; the client's transport errors get their wording in
 the client.
 
 A field's reflect-cpp validators travel the same way. `ReadFileRequest::name`
@@ -89,7 +94,7 @@ The generator writes each bound's message, because JSON Schema has no keyword
 to carry one. A name out of bounds isn't a domain error, so there's no tagged
 error for it. Each boundary rejects it:
 
-- REST: `:name` is `ReadFileRequest.fields.name`, so HttpApi answers 400, and
+- REST: `:name` is `ReadFile.Request.fields.name`, so HttpApi answers 400, and
   the REST client fails with a `SchemaError` before sending anything.
 - RPC: the client can't encode the payload and dies before sending. A raw
   request gets an `Exit` whose cause is a `Die` with the schema's message.
@@ -119,8 +124,8 @@ The C++ integration tests skip when `cmake` isn't on the PATH.
 ## Layout
 
 - `cpp/` is the C++ launcher and reader. `cpp/build/` is ignored.
-- `src/shared/` is the contract both sides import: the errors, the REST API,
-  the RPC group, and the generated reader protocol.
+- `src/shared/` is the contract both sides import: `ReaderUnavailable`, the
+  REST API, the RPC group, and the generated reader protocol.
 - `src/server/` holds `BunReader` and `CppReader`, and the two transports
   mounted on one router; each handler calls the reader its endpoint names.
 - `src/client/` builds both clients, with one call per transport and reader
@@ -128,7 +133,7 @@ The C++ integration tests skip when `cmake` isn't on the PATH.
   that call's errors. A panel runs one through `Effect.result` and renders
   the `Result`; on failure it shows `describeFailure`, which is the error's
   own `message` for the domain errors and the client's wording for transport
-  errors. `App` builds the form schema from the generated `ReadFileRequest`
+  errors. `App` builds the form schema from the generated `ReadFile.Request`
   plus `Reader`, and passes it to each panel, whose react-hook-form resolver
   uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that

@@ -2,7 +2,8 @@ import { Context, Effect, Layer, ManagedRuntime, type Schema } from "effect";
 import { FetchHttpClient, type HttpClientError } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
-import type { ReaderUnavailable, ReadFileError } from "../shared/errors.ts";
+import type { ReadFile } from "../shared/generated/reader-protocol.ts";
+import type { ReaderUnavailable } from "../shared/reader-unavailable.ts";
 import { FilesApi } from "../shared/rest-api.ts";
 import { FilesRpcs } from "../shared/rpc.ts";
 
@@ -21,13 +22,15 @@ export class RestFiles extends Context.Service<
 			name: string,
 		) => Effect.Effect<
 			string,
-			ReadFileError | HttpClientError.HttpClientError | Schema.SchemaError
+			| ReadFile.Error
+			| HttpClientError.HttpClientError
+			| Schema.SchemaError
 		>;
 		readonly cpp: (
 			name: string,
 		) => Effect.Effect<
 			string,
-			| ReadFileError
+			| ReadFile.Error
 			| ReaderUnavailable
 			| HttpClientError.HttpClientError
 			| Schema.SchemaError

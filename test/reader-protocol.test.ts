@@ -2,13 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/reader-protocol/emit.ts";
 import { normalize } from "../scripts/reader-protocol/normalize.ts";
-import {
-	FileNotFound,
-	NotTxtFile,
-	ReadFileError,
-	ReadFileRequest,
-	ReadFileSuccess,
-} from "../src/shared/generated/reader-protocol.ts";
+import { ReadFile } from "../src/shared/generated/reader-protocol.ts";
 
 // The payloads the C++ reader puts on the wire.
 const wire = {
@@ -20,53 +14,53 @@ const wire = {
 
 describe("generated reader protocol", () => {
 	test("structs decode and encode their wire form", () => {
-		expect(Schema.decodeUnknownSync(ReadFileRequest)(wire.request)).toEqual(
-			wire.request,
-		);
-		expect(Schema.encodeSync(ReadFileSuccess)(wire.success)).toEqual(
+		expect(
+			Schema.decodeUnknownSync(ReadFile.Request)(wire.request),
+		).toEqual(wire.request);
+		expect(Schema.encodeSync(ReadFile.Success)(wire.success)).toEqual(
 			wire.success,
 		);
 		expect(() =>
-			Schema.decodeUnknownSync(ReadFileRequest)({ name: 42 }),
+			Schema.decodeUnknownSync(ReadFile.Request)({ name: 42 }),
 		).toThrow();
 	});
 
 	test("a name must be 5 to 25 characters, as the C++ struct says", () => {
-		const accepts = Schema.is(ReadFileRequest);
+		const accepts = Schema.is(ReadFile.Request);
 		expect(accepts({ name: "a".repeat(4) })).toBe(false);
 		expect(accepts({ name: "a".repeat(5) })).toBe(true);
 		expect(accepts({ name: "a".repeat(25) })).toBe(true);
 		expect(accepts({ name: "a".repeat(26) })).toBe(false);
 		expect(() =>
-			Schema.decodeUnknownSync(ReadFileRequest)({ name: "x.md" }),
+			Schema.decodeUnknownSync(ReadFile.Request)({ name: "x.md" }),
 		).toThrow("Must be at least 5 characters long");
 	});
 
 	test("errors decode into the TaggedError classes and encode back", () => {
-		const decode = Schema.decodeUnknownSync(ReadFileError);
+		const decode = Schema.decodeUnknownSync(ReadFile.Error);
 		const notTxt = decode(wire.notTxtFile);
-		expect(notTxt).toBeInstanceOf(NotTxtFile);
+		expect(notTxt).toBeInstanceOf(ReadFile.NotTxtFile);
 		expect(notTxt.file).toBe("config.json");
-		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
-		expect(Schema.encodeSync(ReadFileError)(notTxt)).toEqual(
+		expect(decode(wire.fileNotFound)).toBeInstanceOf(ReadFile.FileNotFound);
+		expect(Schema.encodeSync(ReadFile.Error)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
 		expect(() => decode({ _tag: "Elsewhere", file: "x" })).toThrow();
 	});
 
 	test("errors fill their C++ message template, and send none of it", () => {
-		const notTxt = new NotTxtFile({ file: "config.json" });
+		const notTxt = new ReadFile.NotTxtFile({ file: "config.json" });
 		expect(notTxt.message).toBe('"config.json" is not a .txt file');
 		expect(String(notTxt)).toStartWith(
 			'NotTxtFile: "config.json" is not a .txt file',
 		);
-		expect(new FileNotFound({ file: "missing.txt" }).message).toBe(
+		expect(new ReadFile.FileNotFound({ file: "missing.txt" }).message).toBe(
 			'"missing.txt" does not exist',
 		);
-		expect(Schema.encodeSync(ReadFileError)(notTxt)).toEqual(
+		expect(Schema.encodeSync(ReadFile.Error)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
-		const decoded = Schema.decodeUnknownSync(ReadFileError)(
+		const decoded = Schema.decodeUnknownSync(ReadFile.Error)(
 			wire.fileNotFound,
 		);
 		expect(decoded.message).toBe('"missing.txt" does not exist');
@@ -75,7 +69,7 @@ describe("generated reader protocol", () => {
 	test("errors can be raised and caught by tag", async () => {
 		const caught = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* new NotTxtFile({ file: "a.md" });
+				return yield* new ReadFile.NotTxtFile({ file: "a.md" });
 			}).pipe(
 				Effect.catchTags({
 					NotTxtFile: (error) =>
@@ -124,8 +118,12 @@ describe("emitter", () => {
 		},
 	};
 
+	/** Every module the emitter writes, in one string. */
+	const emitted = (document: unknown) =>
+		[...emit(normalize(document), ["header"]).values()].join("\n");
+
 	test("undoes namespaces, wrappers and optionals", () => {
-		const source = emit(normalize(schema), ["header"]);
+		const source = emitted(schema);
 		expect(source).toContain(
 			'export class Gone extends Schema.TaggedError<Gone>()("Gone", {',
 		);
@@ -133,6 +131,38 @@ describe("emitter", () => {
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
 		expect(source).toContain("export class AB extends RpcGroup.make(");
 		expect(source).not.toContain("__");
+	});
+
+	test("writes a module per method, exported as its namespace", () => {
+		const modules = emit(normalize(schema), ["header"]);
+		expect([...modules.keys()]).toEqual(["get.ts", "a-b.ts"]);
+		const get = modules.get("get.ts") ?? "";
+		// Full names for hovers, short names for consumers.
+		expect(get).toContain("const Query = Schema.Struct({");
+		expect(get).toContain("interface Query extends");
+		expect(get).toContain("const GetError = Schema.Union([Gone]);");
+		expect(get).toContain(
+			"export { Query as Request, Query as Success, GetError as Error };",
+		);
+		const index = modules.get("a-b.ts") ?? "";
+		expect(index).toContain('import * as Get from "./get.ts";');
+		expect(index).toContain("export { Get };");
+		expect(index).toContain(
+			"payload: Get.Request,\nsuccess: Get.Success,\nerror: Get.Error,",
+		);
+	});
+
+	test("fails on a definition two methods share, rather than guess", () => {
+		const protocol = normalize(schema);
+		const [get] = protocol.procedures;
+		if (get === undefined) throw new Error("No procedure");
+		const shared = {
+			...protocol,
+			procedures: [get, { ...get, name: "Put" }],
+		};
+		expect(() => emit(shared, ["header"])).toThrow(
+			"Query is used by both Get and Put, and the generator has no module for shared definitions yet",
+		);
 	});
 
 	test("names length bounds the way a hand-written schema does", () => {
@@ -152,7 +182,7 @@ describe("emitter", () => {
 				minItems: 1,
 			},
 		});
-		const source = emit(normalize(bounded), ["header"]);
+		const source = emitted(bounded);
 		expect(source).toContain(
 			'name: Schema.optionalKey(Schema.String.check(Schema.isMinCodePoints(5, { message: "Must be at least 5 characters long" }), Schema.isMaxCodePoints(25, { message: "Must be at most 25 characters long" }))),',
 		);
@@ -162,7 +192,7 @@ describe("emitter", () => {
 	});
 
 	test("gives an error a message getter from its template", () => {
-		const source = emit(normalize(schema), ["header"]);
+		const source = emitted(schema);
 		const [, body = ""] =
 			/override get message\(\): string \{\nreturn (.*);\n\}/.exec(
 				source,
