@@ -2,18 +2,14 @@ import { useAtom } from "@effect/atom-react";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { Schema } from "effect";
 import { AsyncResult } from "effect/reactivity";
-import { useId, useMemo, useState } from "react";
-import { type UseFormRegisterReturn, useForm } from "react-hook-form";
-import { ReadFile } from "../shared/generated/backend-protocol.ts";
-import { Reader } from "../shared/reader.ts";
-import { describeFailure, type ReadFailure, reads } from "./read-file.ts";
+import { useId, useMemo } from "react";
+import { useForm } from "react-hook-form";
+import { ReadFile } from "../shared/generated/protocol.ts";
+import { describeFailure, readFile } from "./read-file.ts";
 
-// What the form holds: the generated request, so the 5–25 rule and its
-// messages come from the C++ struct, plus which reader to send it to.
-const ReadFileForm = Schema.Struct({
-	...ReadFile.Request.fields,
-	reader: Reader,
-});
+// The generated request, so the 5–25 rule and its messages come from the C++
+// struct.
+const ReadFileForm = ReadFile.Request;
 type ReadFileForm = typeof ReadFileForm;
 
 export function App() {
@@ -49,28 +45,15 @@ function ReaderPanel({
 		resolver,
 		defaultValues: {
 			name: "hello.txt",
-			reader: "bff",
 		} satisfies ReadFileForm["Encoded"],
 	});
-	// One mutation per reader; the switch picks which one a submit runs. In
-	// promiseExit mode a run resolves with its Exit once the result settles,
-	// failure or not, so isSubmitting covers the whole request.
-	const [bff, readBff] = useAtom(reads.bff, { mode: "promiseExit" });
-	const [backend, readBackend] = useAtom(reads.backend, {
-		mode: "promiseExit",
-	});
-	const run = { bff: readBff, backend: readBackend };
-	// The reader of the latest settled submit, so flipping the switch alone
-	// doesn't change what's shown. Before the first submit both are Initial.
-	const [shown, setShown] = useState<Reader>("bff");
-	const result: AsyncResult.AsyncResult<ReadFile.Success, ReadFailure> =
-		shown === "bff" ? bff : backend;
+
+	const [result, read] = useAtom(readFile, { mode: "promiseExit" });
 	const nameError = useId();
 
 	// Runs only once the values pass the schema, so a bad name sends nothing.
-	const submit = handleSubmit(async ({ reader, name }) => {
-		await run[reader]({ payload: { name } });
-		setShown(reader);
+	const submit = handleSubmit(async (payload) => {
+		await read({ payload });
 	});
 
 	return (
@@ -82,7 +65,6 @@ function ReaderPanel({
 					aria-describedby={errors.name && nameError}
 					{...register("name")}
 				/>
-				<ReaderSwitch field={register("reader")} />
 				<button type="submit" disabled={isSubmitting}>
 					Submit
 				</button>
@@ -103,26 +85,5 @@ function ReaderPanel({
 				onDefect: () => <p role="alert">Something went wrong.</p>,
 			})}
 		</section>
-	);
-}
-
-const readerOrder: readonly Reader[] = ["bff", "backend"];
-const readerLabels: Record<Reader, string> = {
-	bff: "BFF",
-	backend: "Backend",
-};
-
-function ReaderSwitch({ field }: { field: UseFormRegisterReturn<"reader"> }) {
-	// Radios group by form and name, so each panel's "reader" is its own group.
-	return (
-		<fieldset className="reader-switch">
-			<legend className="visually-hidden">Reader</legend>
-			{readerOrder.map((reader) => (
-				<label key={reader}>
-					<input type="radio" value={reader} {...field} />
-					{readerLabels[reader]}
-				</label>
-			))}
-		</fieldset>
 	);
 }

@@ -5,19 +5,18 @@ const root = join(import.meta.dir, "..");
 const source = join(root, "cpp");
 const build = join(source, "build");
 
-/** The backend, which launches the BFF, once {@link buildCpp} has built it. */
-export const backendBinary = join(build, "effect-playground-backend");
+/** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
+export const protocolSchemaBinary = join(build, "protocol_schema");
 
 /**
  * Configures the CMake project on first use, then builds it incrementally.
  * The first build fetches reflect-cpp from GitHub.
  */
-export function buildCpp(): string {
+export function buildCpp(): void {
 	if (!existsSync(join(build, "build.ninja"))) {
 		run(["cmake", "-S", source, "-B", build, "-G", "Ninja"]);
 	}
 	run(["cmake", "--build", build]);
-	return backendBinary;
 }
 
 function run(command: string[]) {

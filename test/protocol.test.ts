@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { emit } from "../scripts/backend-protocol/emit.ts";
-import { normalize } from "../scripts/backend-protocol/normalize.ts";
-import { ReadFile } from "../src/shared/generated/backend-protocol.ts";
+import { emit } from "../scripts/protocol/emit.ts";
+import { normalize } from "../scripts/protocol/normalize.ts";
+import { ReadFile } from "../src/shared/generated/protocol.ts";
 
-// The payloads the backend puts on the wire.
+// The JSON forms both sides agree on.
 const wire = {
 	request: { name: "hello.txt" },
 	success: { contents: "Hello\n" },
@@ -12,7 +12,7 @@ const wire = {
 	fileNotFound: { _tag: "FileNotFound", file: "missing.txt" },
 } as const;
 
-describe("generated backend protocol", () => {
+describe("generated protocol", () => {
 	test("structs decode and encode their wire form", () => {
 		expect(
 			Schema.decodeUnknownSync(ReadFile.Request)(wire.request),
@@ -129,7 +129,6 @@ describe("emitter", () => {
 		);
 		expect(source).toContain("/** At most this many. */");
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
-		expect(source).toContain("export class AB extends RpcGroup.make(");
 		expect(source).not.toContain("__");
 	});
 
@@ -147,9 +146,6 @@ describe("emitter", () => {
 		expect(source).toContain("export const Success = Request;");
 		expect(source).toContain(
 			"export const Failure = Schema.Union([Gone]);\nexport type Failure = typeof Failure.Type;",
-		);
-		expect(source).toContain(
-			'Rpc.make("Get", {\npayload: Get.Request,\nsuccess: Get.Success,\nerror: Get.Failure,',
 		);
 		// No aliases, and no C++ name for a struct the namespace renames.
 		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
@@ -196,13 +192,14 @@ describe("emitter", () => {
 			},
 			["header"],
 		);
-		// From a namespace to the next one or to the RPC group.
+		// From a namespace to the next one, or to the end.
 		const block = (name: string) => {
 			const start = source.indexOf(`export namespace ${name} {`);
-			const end = source
-				.slice(start + 1)
-				.search(/^export (namespace|class \w+ extends RpcGroup)/m);
-			return source.slice(start, start + 1 + end);
+			const end = source.slice(start + 1).search(/^export namespace/m);
+			return source.slice(
+				start,
+				end === -1 ? undefined : start + 1 + end,
+			);
 		};
 		expect(block("Get")).toContain("export class Gone extends");
 		expect(block("Get")).not.toContain("Full");
@@ -213,8 +210,6 @@ describe("emitter", () => {
 		expect(block("Put")).toContain(
 			"export const Failure = Schema.Union([Full]);",
 		);
-		expect(source).toContain("error: Get.Failure,");
-		expect(source).toContain("error: Put.Failure,");
 	});
 
 	test("fails on a struct named after a namespace member", () => {

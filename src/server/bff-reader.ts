@@ -1,8 +1,6 @@
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import { ReadFile } from "../shared/generated/backend-protocol.ts";
+import { ReadFile } from "../shared/generated/protocol.ts";
 
-// The BFF's reader: the file system through Effect. Its twin in the backend
-// is cpp/src/read_file.cpp.
 export class BffReader extends Context.Service<
 	BffReader,
 	{

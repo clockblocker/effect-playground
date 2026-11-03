@@ -4,8 +4,7 @@
 	"type": "module",
 	"packageManager": "bun@1.4.2",
 	"scripts": {
-		"dev": "bun run --parallel dev:launcher dev:client",
-		"dev:launcher": "bun scripts/cpp.ts && exec cpp/build/effect-playground-backend -- bun --watch src/server/main.ts",
+		"dev": "bun run --parallel dev:server dev:client",
 		"dev:server": "bun --watch src/server/main.ts",
 		"dev:client": "vite",
 		"build": "vite build",

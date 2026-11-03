@@ -8,34 +8,27 @@ import {
 
 /**
  * Writes the Effect Schema module for a normalized protocol: one file named
- * after the C++ namespace, such as `backend-protocol.ts`.
+ * after the C++ namespace, such as `protocol.ts`.
  *
- * Each procedure gets a TypeScript namespace of its own name, the one its RPC
- * is made with. In it, its payload is `Request`, its success `Success` and
- * its error union `Failure`, and every other definition it uses, such as its
- * error classes, keeps its own name. After the namespaces comes the RPC group.
+ * Each procedure gets a TypeScript namespace of its own name. In it, its
+ * payload is `Request`, its success `Success` and its error union `Failure`,
+ * and every other definition it uses, such as its error classes, keeps its
+ * own name.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
  * declarations around them, which that engine cannot express: `TaggedError`
- * classes, struct and type pairs, JSDoc from descriptions, and the RPC group.
+ * classes, struct and type pairs, and JSDoc from descriptions.
  */
 export function emit(
 	protocol: Protocol,
 	header: readonly string[],
 ): { readonly file: string; readonly source: string } {
 	const { namespace, procedures, definitions } = protocol;
-	const group = pascalCase(namespace || "Protocol");
 
 	// A definition lives in the namespace of the one procedure that uses it.
 	const owners = new Map<string, string>();
 	const namespaces = procedures.map((procedure) => {
-		if (procedure.name === group) {
-			throw new Error(
-				`${procedure.name} would clash with the RPC group ${group}; ` +
-					"rename the procedure or the C++ namespace",
-			);
-		}
 		const names = dependencyOrder(
 			[procedure.payload, procedure.success, ...procedure.errors],
 			definitions,
@@ -59,24 +52,13 @@ export function emit(
 		...namespaceNote.map((line) => `// ${line}`),
 		"",
 		'import { Schema } from "effect";',
-		'import { Rpc, RpcGroup } from "effect/rpc";',
 		"",
 		...namespaces,
-		`/** The backend's procedures, for an Effect RPC client over JSON-RPC. */`,
-		`export class ${group} extends RpcGroup.make(`,
-		...procedures.map(({ name }) =>
-			[
-				`Rpc.make(${JSON.stringify(name)}, {`,
-				`payload: ${name}.Request,`,
-				`success: ${name}.Success,`,
-				`error: ${name}.Failure,`,
-				"}),",
-			].join("\n"),
-		),
-		") {}",
-		"",
 	].join("\n");
-	return { file: `${kebabCase(group)}.ts`, source };
+	return {
+		file: `${kebabCase(pascalCase(namespace || "protocol"))}.ts`,
+		source,
+	};
 }
 
 const namespaceNote = [
@@ -390,7 +372,7 @@ function wrap(text: string, width: number): string[] {
 	return [...lines, line];
 }
 
-/** `BackendProtocol` → `backend-protocol`. */
+/** `AB` → `a-b`. */
 function kebabCase(identifier: string): string {
 	return identifier.replaceAll(/(?<=.)([A-Z])/g, "-$1").toLowerCase();
 }

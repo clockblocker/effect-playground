@@ -1,6 +1,6 @@
 import { type JsonSchema, Predicate } from "effect";
 
-/** A struct from the backend protocol's C++ header, under its C++ name. */
+/** A struct from `cpp/include/protocol.hpp`, under its C++ name. */
 export interface Definition {
 	readonly name: string;
 	/** The JSON Schema, with `$ref`s renamed, descriptions removed and objects closed. */
@@ -25,7 +25,7 @@ export interface Procedure {
 }
 
 export interface Protocol {
-	/** The C++ namespace, such as `backend_protocol`. */
+	/** The C++ namespace, such as `protocol`. */
 	readonly namespace: string;
 	readonly procedures: readonly Procedure[];
 	readonly definitions: ReadonlyMap<string, Definition>;
@@ -46,8 +46,8 @@ const errorOwnFields = new Set(["name", "message", "stack", "cause"]);
 
 /**
  * Reads the JSON Schema that reflect-cpp emits for the procedure struct and
- * undoes its encodings: `$defs` keys such as `backend_protocol__NotTxtFile` or
- * `backend_protocol__NotTxtFile__tagged` become C++ names, and the `_tag`
+ * undoes its encodings: `$defs` keys such as `protocol__NotTxtFile` or
+ * `protocol__NotTxtFile__tagged` become C++ names, and the `_tag`
  * property of a tagged alternative becomes its tag. Fails on any shape the
  * emitter does not support, rather than emitting something wrong.
  */

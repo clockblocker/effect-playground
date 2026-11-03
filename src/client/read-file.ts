@@ -1,18 +1,10 @@
 import { Match } from "effect";
 import type { Atom } from "effect/reactivity";
-import type { Reader } from "../shared/reader.ts";
 import { BffRpcClient } from "./clients.ts";
 
-// One mutation per reader. Each succeeds with the success struct and fails
-// with exactly what its procedure can fail with, so only the backend one
-// lists BackendUnavailable: hover one to see it.
-export const reads = {
-	bff: BffRpcClient.mutation("ReadFileBff"),
-	backend: BffRpcClient.mutation("ReadFileBackend"),
-};
+export const readFile = BffRpcClient.mutation("ReadFile");
 
-/** Whatever either mutation can fail with. */
-export type ReadFailure = Atom.Failure<(typeof reads)[Reader]>;
+export type ReadFailure = Atom.Failure<typeof readFile>;
 
 /**
  * What the page says when a call fails. The domain errors say it themselves;

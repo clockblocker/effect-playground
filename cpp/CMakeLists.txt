@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(effect_playground_backend LANGUAGES C CXX)
+project(effect_playground LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,14 +23,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(reflectcpp)
 
-add_executable(effect-playground-backend
-	src/main.cpp
-	src/json_rpc.cpp
-	src/protocol_schema.cpp
-	src/read_file.cpp
-	src/tcp_server.cpp
-	src/watchdog.cpp
-)
-target_include_directories(effect-playground-backend PRIVATE include)
-target_link_libraries(effect-playground-backend PRIVATE reflectcpp)
-target_compile_options(effect-playground-backend PRIVATE -Wall -Wextra -Wpedantic)
+add_executable(protocol_schema src/protocol_schema.cpp)
+
+foreach(target protocol_schema)
+	target_include_directories(${target} PRIVATE include)
+	target_link_libraries(${target} PRIVATE reflectcpp)
+	target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+endforeach()

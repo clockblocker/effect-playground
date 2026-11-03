@@ -1,14 +1,16 @@
-#include "protocol_schema.hpp"
+// protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
+// emits, plus each error's message template as "x-message". reflect-cpp only
+// describes fields, and the template is a static member.
 
+#include <iostream>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
-#include "backend_protocol.hpp"
+#include "protocol.hpp"
 
-namespace protocol_schema {
 namespace {
 
 using rfl::Generic;
@@ -22,7 +24,7 @@ Generic::Object& object(Generic& value, std::string_view what) {
 }
 
 // reflect-cpp's $defs key for an alternative of an rfl::TaggedUnion:
-// "backend_protocol::NotTxtFile" → "backend_protocol__NotTxtFile__tagged".
+// "protocol::NotTxtFile" → "protocol__NotTxtFile__tagged".
 template <class Error>
 std::string tagged_key() {
 	std::string key = rfl::type_name_t<Error>().str();
@@ -57,13 +59,11 @@ void add_messages(Generic::Object& defs,
 
 }  // namespace
 
-std::string emit() {
-	using backend_protocol::ReadFile;
+int main() {
+	using protocol::ReadFile;
 	auto document =
 		rfl::json::read<Generic>(rfl::json::to_schema<ReadFile>()).value();
 	auto& defs = object(object(document, "the schema")["$defs"], "$defs");
 	add_messages(defs, std::type_identity<decltype(ReadFile::error)>());
-	return rfl::json::write(document, rfl::json::pretty);
+	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";
 }
-
-}  // namespace protocol_schema
