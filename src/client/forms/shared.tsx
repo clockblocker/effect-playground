@@ -37,15 +37,16 @@ export function setFailure<Path extends ReadonlyArray<string | number>>(
 	exit: Exit.Exit<unknown, Failure<Path>>,
 	setError: (name: FieldOf<Path> | "root.server", error: ErrorOption) => void,
 ): void {
-	if (Exit.isSuccess(exit)) return;
+	// A cancelled submit says nothing: no one is waiting for it.
+	if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return;
 	const failure = Cause.findErrorOption(exit.cause);
 	if (Option.isNone(failure)) {
-		// No typed error in the cause: a defect or an interruption.
+		// No typed error in the cause: a defect, which the BFF logged.
 		setError("root.server", { message: "Something went wrong." });
 	} else if (failure.value._tag === "RpcClientError") {
 		// The transport error is the client's own, so its wording lives here.
 		setError("root.server", {
-			message: `Request failed: ${failure.value.message}`,
+			message: `Request failed: ${transportMessage(failure.value)}`,
 		});
 	} else if (failure.value._tag !== "InvalidRequest") {
 		setError("root.server", { message: failure.value.message });
@@ -59,6 +60,16 @@ export function setFailure<Path extends ReadonlyArray<string | number>>(
 			setError(field, { type: "server", message });
 		}
 	}
+}
+
+// An HTTP error's own message is empty; its cause, such as a TransportError,
+// says what failed and where.
+function transportMessage({ reason }: RpcClientError.RpcClientError): string {
+	if (reason._tag !== "HttpError") return reason.message;
+	const { cause } = reason;
+	return cause instanceof Error && cause.message !== ""
+		? cause.message
+		: reason.kind;
 }
 
 /** A react-hook-form resolver that validates against `schema`. */
@@ -108,7 +119,10 @@ export function TextField({
 	);
 }
 
-/** A mutation's latest success, or in its place the form's `root.server` error. */
+/**
+ * A mutation's latest success, or in its place the form's `root.server`
+ * error. A failure without one, such as an interruption, shows nothing.
+ */
 export function Outcome<A>({
 	result,
 	error,
