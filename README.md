@@ -110,17 +110,17 @@ bun run generate:check
 - `src/server/` is the BFF: `BffReader`, and the two transports mounted on
   one router.
 - `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
-  `BffRpcClient`, with the read as a mutation, `readFile`. It holds an
-  `AsyncResult` of the success struct, failing with exactly the procedure's
-  errors. The client's runtime is an atom too, so the protocol is built once,
-  not per submit. `main.tsx` wraps the page in `@effect/atom-react`'s
-  `RegistryProvider`, which holds the atoms. A submit runs the mutation and
-  waits for it to settle, which keeps the button disabled meanwhile. On
-  failure the page shows `describeFailure`, which is the error's own
-  `message` for the domain errors and the client's wording for the transport
-  error, and a generic message for a defect. `App` passes the generated
-  `ReadFile.Request` to the panel as its form schema, which its
-  react-hook-form resolver uses.
+  `BffRpcClient`. The client's runtime is an atom too, so the protocol is
+  built once, not per submit. `main.tsx` wraps the page in
+  `@effect/atom-react`'s `RegistryProvider`, which holds the atoms.
+  `forms/read-file.tsx` is the read form: `App` passes it the generated
+  `ReadFile.Request` as its schema, which its react-hook-form resolver uses,
+  and it runs the read as a mutation, which holds an `AsyncResult` of the
+  success struct, failing with exactly the procedure's errors. A submit runs
+  the mutation and waits for it to settle, which keeps the button disabled
+  meanwhile. On failure the form shows `describeFailure`, which is the
+  error's own `message` for the domain errors and the client's wording for
+  the transport error, and a generic message for a defect.
 - `test/` holds the Bun tests.
 - `scripts/` builds the C++ and runs the code generator.
 
