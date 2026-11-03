@@ -5,7 +5,7 @@ import {
 	HttpApiGroup,
 	HttpApiSchema,
 } from "effect/http-api";
-import { FileNotFound, NotTxtFile, ReadFile } from "./generated/protocol.ts";
+import { ReadFile } from "./generated/protocol.ts";
 
 // HttpApiSchema.status keeps what a schema decodes to and from, but Effect
 // types the annotated schema by its internals (decodeTo<declareConstructor…>),
@@ -32,10 +32,7 @@ export class BffApi extends HttpApi.make("bff").add(
 			HttpApiEndpoint.get("read", "/files/read/:name", {
 				params,
 				success: Schema.String.pipe(HttpApiSchema.asText()),
-				error: [
-					NotTxtFile.pipe(withStatus(415)),
-					FileNotFound.pipe(withStatus(404)),
-				],
+				error: ReadFile.InvalidRequest.pipe(withStatus(422)),
 			}),
 		)
 		.prefix("/api"),

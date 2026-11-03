@@ -1,11 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/protocol/emit.ts";
 import { normalize } from "../scripts/protocol/normalize.ts";
 import {
 	CustomCat,
-	FileNotFound,
-	NotTxtFile,
+	fieldOf,
+	IssueCode,
+	IssueMessage,
 	ReadFile,
 } from "../src/shared/generated/protocol.ts";
 
@@ -13,8 +16,16 @@ import {
 const wire = {
 	request: { name: "hello.txt" },
 	success: { contents: "Hello\n" },
-	notTxtFile: { _tag: "NotTxtFile", file: "config.json" },
-	fileNotFound: { _tag: "FileNotFound", file: "missing.txt" },
+	invalidRequest: {
+		_tag: "InvalidRequest",
+		issues: [
+			{
+				code: "NotTxtFile",
+				message: '"config.json" is not a .txt file',
+				path: ["name"],
+			},
+		],
+	},
 } as const;
 
 describe("generated protocol", () => {
@@ -30,7 +41,7 @@ describe("generated protocol", () => {
 		).toThrow();
 	});
 
-	test("a name must be 5 to 25 characters, as the C++ struct says", () => {
+	test("a name must be 5 to 25 characters, in the C++ rules' words", () => {
 		const accepts = Schema.is(ReadFile.Request);
 		expect(accepts({ name: "a".repeat(4) })).toBe(false);
 		expect(accepts({ name: "a".repeat(5) })).toBe(true);
@@ -39,384 +50,415 @@ describe("generated protocol", () => {
 		expect(() =>
 			Schema.decodeUnknownSync(ReadFile.Request)({ name: "x.md" }),
 		).toThrow("Must be at least 5 characters long");
+		expect(() =>
+			Schema.decodeUnknownSync(CustomCat.Request)({
+				inputFile: "hello.txt",
+				outputFile: "a".repeat(26),
+			}),
+		).toThrow("Must be at most 25 characters long");
 	});
 
-	test("errors decode into the TaggedError classes and encode back", () => {
+	test("an InvalidRequest decodes into its class and encodes back", () => {
 		const decode = Schema.decodeUnknownSync(ReadFile.Failure);
-		const notTxt = decode(wire.notTxtFile);
-		expect(notTxt).toBeInstanceOf(NotTxtFile);
-		expect(notTxt.file).toBe("config.json");
-		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
-		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
-			wire.notTxtFile,
+		const invalid = decode(wire.invalidRequest);
+		expect(invalid).toBeInstanceOf(ReadFile.InvalidRequest);
+		expect(invalid.issues[0].path).toEqual(["name"]);
+		expect(Schema.encodeSync(ReadFile.Failure)(invalid)).toEqual(
+			wire.invalidRequest,
 		);
-		expect(() => decode({ _tag: "Elsewhere", file: "x" })).toThrow();
+		expect(() => decode({ ...wire.invalidRequest, issues: [] })).toThrow();
+		expect(() =>
+			decode({
+				...wire.invalidRequest,
+				issues: [{ ...wire.invalidRequest.issues[0], code: "Odd" }],
+			}),
+		).toThrow();
 	});
 
-	test("errors fill their C++ message template, and send none of it", () => {
-		const notTxt = new NotTxtFile({ file: "config.json" });
-		expect(notTxt.message).toBe('"config.json" is not a .txt file');
-		expect(String(notTxt)).toStartWith(
-			'NotTxtFile: "config.json" is not a .txt file',
-		);
-		expect(new FileNotFound({ file: "missing.txt" }).message).toBe(
-			'"missing.txt" does not exist',
-		);
-		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
-			wire.notTxtFile,
-		);
-		const decoded = Schema.decodeUnknownSync(ReadFile.Failure)(
-			wire.fileNotFound,
-		);
-		expect(decoded.message).toBe('"missing.txt" does not exist');
+	test("an issue's path is one of its method's fields", () => {
+		const accepts = Schema.is(CustomCat.Path);
+		expect(accepts(["inputFile"])).toBe(true);
+		expect(accepts(["outputFile"])).toBe(true);
+		expect(accepts(["name"])).toBe(false);
+		expect(accepts(["inputFile", 0])).toBe(false);
+		expect(Schema.is(ReadFile.Path)(["name"])).toBe(true);
+		expect(Schema.is(ReadFile.Path)(["inputFile"])).toBe(false);
 	});
 
-	test("both custom_cat names follow the same 5 to 25 rule", () => {
-		const accepts = Schema.is(CustomCat.Request);
-		const ok = { inputFile: "hello.txt", outputFile: "copy.txt" };
-		expect(accepts(ok)).toBe(true);
-		expect(accepts({ ...ok, inputFile: "x.md" })).toBe(false);
-		expect(accepts({ ...ok, outputFile: "a".repeat(26) })).toBe(false);
-	});
-
-	test("both methods fail with the same error classes", () => {
-		const decode = Schema.decodeUnknownSync(CustomCat.Failure);
-		expect(decode(wire.notTxtFile)).toBeInstanceOf(NotTxtFile);
-		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
+	test("its message joins the issues' messages, and none of it is sent", () => {
+		const invalid = new CustomCat.InvalidRequest({
+			issues: [
+				{
+					code: "NotTxtFile",
+					message: IssueMessage.NotTxtFile({ value: "a.json" }),
+					path: ["inputFile"],
+				},
+				{
+					code: "Missing",
+					message: IssueMessage.Missing(),
+					path: ["outputFile"],
+				},
+			],
+		});
+		expect(invalid.message).toBe('"a.json" is not a .txt file; Required');
+		expect(String(invalid)).toStartWith("InvalidRequest: ");
 		expect(
-			Schema.decodeUnknownSync(ReadFile.Failure)(wire.notTxtFile),
-		).toEqual(decode(wire.notTxtFile));
+			Object.keys(Schema.encodeSync(CustomCat.InvalidRequest)(invalid)),
+		).toEqual(["_tag", "issues"]);
 	});
 
-	test("the schema carries each shared error's template once", async () => {
+	test("the issue codes are the C++ enum's, each with its rule's template", async () => {
 		const schema = await Bun.file(
 			new URL("../cpp/protocol.schema.json", import.meta.url),
-		).text();
-		expect(schema.match(/"x-message"/g)).toHaveLength(2);
+		).json();
+		const codes: string[] = [
+			"Missing",
+			"TooShort",
+			"TooLong",
+			"NotTxtFile",
+			"FileNotFound",
+		];
+		expect<readonly string[]>(IssueCode.literals).toEqual(codes);
+		expect(schema.$defs.protocol__Issue.properties.code.enum).toEqual(
+			codes,
+		);
+		expect(Object.keys(schema["x-issues"])).toEqual(codes);
+		expect(Object.keys(IssueMessage)).toEqual(codes);
 	});
 
-	test("errors can be raised and caught by tag", async () => {
+	test("each code's message is its C++ template, filled in", () => {
+		expect(IssueMessage.TooShort({ limit: 5 })).toBe(
+			"Must be at least 5 characters long",
+		);
+		expect(IssueMessage.FileNotFound({ value: "missing.txt" })).toBe(
+			'"missing.txt" does not exist',
+		);
+	});
+
+	test("fieldOf names a path the way react-hook-form does", () => {
+		expect(fieldOf(["inputFile"])).toBe("inputFile");
+		expect(fieldOf(["files", 2, "input"])).toBe("files.2.input");
+	});
+
+	test("an InvalidRequest can be raised and caught by tag", async () => {
 		const caught = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* new NotTxtFile({ file: "a.md" });
+				return yield* Schema.decodeUnknownSync(ReadFile.InvalidRequest)(
+					wire.invalidRequest,
+				);
 			}).pipe(
 				Effect.catchTags({
-					NotTxtFile: (error) =>
-						Effect.succeed(`not txt: ${error.file}`),
+					InvalidRequest: ({ issues }) =>
+						Effect.succeed(issues.map(({ code }) => code)),
 				}),
 			),
 		);
-		expect(caught).toBe("not txt: a.md");
+		expect(caught).toEqual(["NotTxtFile"]);
 	});
 });
 
-describe("emitter", () => {
-	// reflect-cpp's shapes for a nested namespace, std::optional and int.
-	const schema = {
-		$ref: "#/$defs/a__b__Get",
-		$defs: {
-			a__b__Get: {
-				type: "object",
-				properties: {
-					payload: { $ref: "#/$defs/a__b__Query" },
-					success: { $ref: "#/$defs/a__b__Query" },
-					error: { anyOf: [{ $ref: "#/$defs/a__b__Gone__tagged" }] },
-				},
-				required: ["payload", "success", "error"],
-			},
-			a__b__Query: {
-				type: "object",
-				properties: {
-					limit: {
-						type: "integer",
-						description: "At most this many.",
-					},
-				},
-				required: [],
-			},
-			a__b__Gone__tagged: {
-				type: "object",
-				// Backticks, $ and \ are literal text in the generated getter.
-				"x-message": "`{id}` is gone; $ and \\ stay",
-				properties: {
-					_tag: { type: "string", enum: ["Gone"] },
-					id: { type: "integer" },
-				},
-				required: ["_tag", "id"],
-			} as Record<string, unknown>,
-		},
-	};
-
-	/** The module the emitter writes. */
-	const emitted = (document: unknown) =>
-		emit(normalize(document), ["header"]).source;
-
-	test("undoes namespaces, wrappers and optionals", () => {
-		const source = emitted(schema);
-		expect(source).toContain(
-			'export class Gone extends Schema.TaggedError<Gone>()("Gone", {',
-		);
-		expect(source).toContain("/** At most this many. */");
-		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
-		expect(source).not.toContain("__");
-	});
-
-	test("writes one module, with a namespace per method", () => {
-		const { file, source } = emit(normalize(schema), ["header"]);
-		expect(file).toBe("a-b.ts");
-		expect(source).toStartWith("// header\n");
-		expect(source).toContain("export namespace Get {");
-		// The payload is declared as Request, schema and type under one name.
-		expect(source).toContain("export const Request = Schema.Struct({");
-		expect(source).toContain(
-			"export interface Request extends Schema.Schema.Type<typeof Request> {}",
-		);
-		// Query is the payload and the success too.
-		expect(source).toContain("export const Success = Request;");
-		expect(source).toContain(
-			"export const Failure = Schema.Union([Gone]);\nexport type Failure = typeof Failure.Type;",
-		);
-		// No aliases, and no C++ name for a struct the namespace renames.
-		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
-		expect(source).not.toContain("Query");
-	});
-
-	test("fails on a struct named after a namespace member", () => {
-		const clashing = structuredClone(schema) as {
-			$defs: Record<string, Record<string, unknown>>;
-		};
-		const gone = clashing.$defs.a__b__Gone__tagged ?? {};
-		delete clashing.$defs.a__b__Gone__tagged;
-		clashing.$defs.a__b__Failure__tagged = {
-			...gone,
-			properties: {
-				...(gone.properties as object),
-				_tag: { type: "string", enum: ["Failure"] },
-			},
-		};
-		clashing.$defs.a__b__Get = {
-			...clashing.$defs.a__b__Get,
-			properties: {
-				...(clashing.$defs.a__b__Get?.properties as object),
-				error: { $ref: "#/$defs/a__b__Failure__tagged" },
-			},
-		};
-		expect(() => emitted(clashing)).toThrow(
-			"Failure would clash with Get.Failure; rename the struct",
-		);
-	});
-
-	test("fails on a struct that refers to the payload by its C++ name", () => {
-		const referring = structuredClone(schema);
-		Object.assign(referring.$defs.a__b__Gone__tagged.properties as object, {
-			query: { $ref: "#/$defs/a__b__Query" },
-		});
-		expect(() => emitted(referring)).toThrow(
-			"Gone refers to Query, which Get declares as Request",
-		);
-	});
-
-	test("names length bounds the way a hand-written schema does", () => {
-		const bounded = structuredClone(schema);
-		Object.assign(bounded.$defs.a__b__Query.properties, {
-			// rfl::Validator<std::string, rfl::Size<…>, rfl::Size<…>>
-			name: {
-				allOf: [
-					{ type: "string", minLength: 5 },
-					{ type: "string", maxLength: 25 },
-				],
-			},
-			// A bounded array of bounded strings: two schemas, two calls.
-			tags: {
-				type: "array",
-				items: { type: "string", minLength: 2 },
-				minItems: 1,
-			},
-		});
-		const source = emitted(bounded);
-		expect(source).toContain(
-			'name: Schema.optionalKey(Schema.String.check(Schema.isMinCodePoints(5, { message: "Must be at least 5 characters long" }), Schema.isMaxCodePoints(25, { message: "Must be at most 25 characters long" }))),',
-		);
-		expect(source).toContain(
-			'tags: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinCodePoints(2, { message: "Must be at least 2 characters long" }))).check(Schema.isMinLength(1)',
-		);
-	});
-
-	test("gives an error a message getter from its template", () => {
-		const source = emitted(schema);
-		const [, body = ""] =
-			/override get message\(\): string \{\nreturn (.*);\n\}/.exec(
-				source,
-			) ?? [];
-		const message = new Function(`return ${body};`).call({ id: 7 });
-		expect(message).toBe("`7` is gone; $ and \\ stay");
-		expect(source).not.toContain("x-message");
-	});
-
-	test("rejects an error without a message template", () => {
-		const untemplated = structuredClone(schema);
-		delete untemplated.$defs.a__b__Gone__tagged["x-message"];
-		expect(() => normalize(untemplated)).toThrow(
-			/Gone has no message template/,
-		);
-	});
-
-	test("rejects a template that names a field the error lacks", () => {
-		const misnamed = structuredClone(schema);
-		misnamed.$defs.a__b__Gone__tagged["x-message"] = "{id} or {name}";
-		expect(() => normalize(misnamed)).toThrow(
-			"Gone's message names {name}, but Gone has no such field (it has {id})",
-		);
-	});
-
-	test("rejects an error field that would shadow Error's own", () => {
-		const shadowing = structuredClone(schema);
-		Object.assign(shadowing.$defs.a__b__Gone__tagged.properties as object, {
-			name: { type: "string" },
-		});
-		expect(() => normalize(shadowing)).toThrow(
-			"Gone.name would shadow Error.name; rename the field",
-		);
-	});
-
-	test("rejects an error that isn't a tagged alternative", () => {
-		const untagged = structuredClone(schema);
-		untagged.$defs.a__b__Get.properties.error = {
-			anyOf: [{ $ref: "#/$defs/a__b__Query" }],
-		};
-		expect(() => normalize(untagged)).toThrow(/TaggedUnion/);
-	});
-});
-
-describe("emitter, for methods that share errors", () => {
-	// reflect-cpp's shape for std::tuple<Get, Put>: Busy is an error of both.
-	const tagged = (tag: string, message: string) => ({
-		type: "object",
-		"x-message": message,
-		properties: { _tag: { type: "string", enum: [tag] } },
-		required: ["_tag"],
-	});
-	const struct = (field: string) => ({
-		type: "object",
-		properties: { [field]: { type: "string" } },
-		required: [field],
-	});
-	const method = (payload: string, success: string, errors: string[]) => ({
+/** reflect-cpp's shapes for what protocol_schema prints. */
+function fixture() {
+	const method = (payload: string, success: string) => ({
 		type: "object",
 		properties: {
 			payload: { $ref: `#/$defs/a__${payload}` },
 			success: { $ref: `#/$defs/a__${success}` },
-			error: {
-				anyOf: errors.map((error) => ({
-					$ref: `#/$defs/a__${error}__tagged`,
-				})),
-			},
+			error: { anyOf: [{ $ref: "#/$defs/a__InvalidRequest__tagged" }] },
 		},
 		required: ["payload", "success", "error"],
 	});
-	const schema = {
+	return {
 		type: "array",
-		prefixItems: [{ $ref: "#/$defs/a__Get" }, { $ref: "#/$defs/a__Put" }],
+		prefixItems: [{ $ref: "#/$defs/a__b__Get" }],
 		items: false,
 		$defs: {
-			a__Get: method("Query", "Found", ["Gone", "Busy"]),
-			a__Put: method("Item", "Stored", ["Full", "Busy"]),
-			a__Query: struct("key"),
-			a__Found: struct("value"),
-			a__Item: struct("body"),
-			a__Stored: struct("id"),
-			a__Gone__tagged: tagged("Gone", "gone"),
-			a__Full__tagged: tagged("Full", "no room"),
-			a__Busy__tagged: tagged("Busy", "busy, try again"),
+			a__b__Get: method("b__Query", "b__Found"),
+			a__b__Query: {
+				type: "object",
+				properties: {
+					files: {
+						type: "array",
+						items: { $ref: "#/$defs/a__b__Pair" },
+					},
+					label: {
+						description: "What the batch is called.",
+						type: "string",
+						minLength: 2,
+					},
+					limit: { anyOf: [{ type: "integer" }, { type: "null" }] },
+				},
+				required: ["files", "label"],
+			},
+			a__b__Pair: {
+				type: "object",
+				properties: {
+					input: { type: "string" },
+					output: { type: "string" },
+				},
+				required: ["input", "output"],
+			},
+			a__b__Found: {
+				type: "object",
+				properties: { count: { type: "integer" } },
+				required: ["count"],
+			},
+			a__Issue: {
+				type: "object",
+				properties: {
+					code: {
+						type: "string",
+						enum: ["Missing", "TooShort", "Odd"],
+					},
+					message: { type: "string" },
+					path: {
+						type: "array",
+						items: {
+							anyOf: [{ type: "string" }, { type: "integer" }],
+						},
+					},
+				},
+				required: ["code", "message", "path"],
+			},
+			a__InvalidRequest__tagged: {
+				type: "object",
+				properties: {
+					_tag: { type: "string", enum: ["InvalidRequest"] },
+					issues: {
+						type: "array",
+						items: { $ref: "#/$defs/a__Issue" },
+						minItems: 1,
+					},
+				},
+				required: ["_tag", "issues"],
+			},
+		} as Record<string, Record<string, unknown>>,
+		"x-issues": {
+			Missing: { message: "Required" },
+			TooShort: { message: "At least {limit}", keyword: "minLength" },
+			// Backticks, $ and \ are literal text in the generated function.
+			Odd: { message: "`{value}` is odd; $ and \\ stay" },
 		} as Record<string, Record<string, unknown>>,
 	};
-	const { source } = emit(normalize(schema), ["header"]);
+}
 
-	// From a namespace to the next one, or to the end.
-	const block = (name: string) => {
-		const start = source.indexOf(`export namespace ${name} {`);
-		const end = source.slice(start + 1).search(/^export namespace/m);
-		return source.slice(start, end === -1 ? undefined : start + 1 + end);
+/** The module the emitter writes. */
+const emitted = (document: unknown) =>
+	emit(normalize(document), ["header"]).source;
+
+// Under node_modules, so that the module finds effect.
+mkdirSync(join(import.meta.dir, "../node_modules/.cache"), { recursive: true });
+const scratch = mkdtempSync(
+	join(import.meta.dir, "../node_modules/.cache/emitted-"),
+);
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+/** Imports what the emitter writes for `document`. */
+async function load(document: unknown) {
+	const path = join(scratch, `${crypto.randomUUID()}.ts`);
+	await Bun.write(path, emitted(document));
+	return import(path);
+}
+
+describe("emitter", () => {
+	test("writes one module, with a namespace per method", () => {
+		const { file, source } = emit(normalize(fixture()), ["header"]);
+		expect(file).toBe("a-b.ts");
+		expect(source).toStartWith("// header\n");
+		expect(source).toContain("export namespace Get {");
+		expect(source).toContain("export const Request = Schema.Struct({");
+		expect(source).toContain(
+			"export interface Request extends Schema.Schema.Type<typeof Request> {}",
+		);
+		expect(source).toContain("export const Success = Schema.Struct({");
+		expect(source).toContain(
+			"export const Failure = InvalidRequest;\nexport type Failure = InvalidRequest;",
+		);
+		expect(source).toContain("/** What the batch is called. */");
+		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
+		expect(source).not.toContain("__");
+		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
+		expect(source).not.toContain("Query");
+	});
+
+	test("lists a path per field, through arrays by index", async () => {
+		const { source } = emit(normalize(fixture()), ["header"]);
+		expect(source).toContain(
+			'export const Path = Schema.Union([Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("input")]), Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("output")]), Schema.Tuple([Schema.Literal("label")]), Schema.Tuple([Schema.Literal("limit")])]);',
+		);
+		const { Get } = await load(fixture());
+		const accepts = Schema.is(Get.Path);
+		expect(accepts(["files", 2, "input"])).toBe(true);
+		expect(accepts(["files", 0, "output"])).toBe(true);
+		expect(accepts(["label"])).toBe(true);
+		expect(accepts(["files"])).toBe(false);
+		expect(accepts(["files", "2", "input"])).toBe(false);
+		expect(accepts(["files", 2, "label"])).toBe(false);
+		const decode = Schema.decodeUnknownSync(Get.InvalidRequest);
+		expect(
+			decode({
+				_tag: "InvalidRequest",
+				issues: [
+					{
+						code: "Odd",
+						message: "odd",
+						path: ["files", 2, "input"],
+					},
+				],
+			}).issues[0].path,
+		).toEqual(["files", 2, "input"]);
+		expect(() =>
+			decode({
+				_tag: "InvalidRequest",
+				issues: [{ code: "Odd", message: "odd", path: ["nope"] }],
+			}),
+		).toThrow();
+	});
+
+	test("writes each code's template as a function of its placeholders", async () => {
+		const { IssueCode, IssueMessage, fieldOf } = await load(fixture());
+		expect(IssueCode.literals).toEqual(["Missing", "TooShort", "Odd"]);
+		expect(IssueMessage.Missing()).toBe("Required");
+		expect(IssueMessage.TooShort({ limit: 2 })).toBe("At least 2");
+		expect(IssueMessage.Odd({ value: "x" })).toBe(
+			"`x` is odd; $ and \\ stay",
+		);
+		expect(fieldOf(["files", 2, "input"])).toBe("files.2.input");
+	});
+
+	test("gives a length bound the message of the code that carries it", async () => {
+		expect(emitted(fixture())).toContain(
+			"Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }) })",
+		);
+		const { Get } = await load(fixture());
+		expect(() =>
+			Schema.decodeUnknownSync(Get.Request)({ files: [], label: "a" }),
+		).toThrow("At least 2");
+	});
+
+	test("rejects a bound no code carries", () => {
+		const document = fixture();
+		delete document["x-issues"].TooShort?.keyword;
+		expect(() => emitted(document)).toThrow(
+			/\{limit\}, but only \{value\} can be filled in/,
+		);
+		document["x-issues"].TooShort = { message: "short" };
+		expect(() => emitted(document)).toThrow(
+			"A field has a minLength, but no issue code's rule carries one",
+		);
+	});
+
+	test("rejects a template with an unknown placeholder", () => {
+		const document = fixture();
+		document["x-issues"].Odd = { message: "{value} or {name}" };
+		expect(() => normalize(document)).toThrow(
+			"Odd's message names {name}, but only {value} can be filled in",
+		);
+	});
+
+	test("rejects codes that don't match the C++ enum", () => {
+		const document = fixture();
+		delete document["x-issues"].Odd;
+		expect(() => normalize(document)).toThrow(
+			"Issue.code must be the enum Missing, TooShort, the codes with templates",
+		);
+	});
+
+	test("rejects an error other than InvalidRequest", () => {
+		const document = fixture();
+		document.$defs.a__b__Get = {
+			...document.$defs.a__b__Get,
+			properties: {
+				...(document.$defs.a__b__Get?.properties as object),
+				error: { $ref: "#/$defs/a__b__Found" },
+			},
+		};
+		expect(() => normalize(document)).toThrow(
+			'Get.error must be rfl::TaggedUnion<"_tag", InvalidRequest>',
+		);
+	});
+
+	test("rejects an InvalidRequest field that would shadow Error's own", () => {
+		const document = fixture();
+		Object.assign(
+			document.$defs.a__InvalidRequest__tagged?.properties as object,
+			{ message: { type: "string" } },
+		);
+		expect(() => normalize(document)).toThrow(
+			"InvalidRequest.message would shadow Error.message; rename the field",
+		);
+	});
+
+	test("fails on a struct named after a namespace member", () => {
+		const document = fixture();
+		const pair = document.$defs.a__b__Pair;
+		delete document.$defs.a__b__Pair;
+		document.$defs.a__b__Path = pair ?? {};
+		Object.assign(document.$defs.a__b__Query?.properties as object, {
+			files: { type: "array", items: { $ref: "#/$defs/a__b__Path" } },
+		});
+		expect(() => emitted(document)).toThrow(
+			"Path would clash with Get.Path; rename the struct",
+		);
+	});
+
+	test("fails on a struct that refers to the success by its C++ name", () => {
+		const document = fixture();
+		Object.assign(document.$defs.a__b__Pair?.properties as object, {
+			found: { $ref: "#/$defs/a__b__Found" },
+		});
+		expect(() => emitted(document)).toThrow(
+			"Pair refers to Found, which Get declares as Success",
+		);
+	});
+});
+
+describe("emitter, for methods that share a struct", () => {
+	const shared = () => {
+		const document = fixture();
+		document.prefixItems.push({ $ref: "#/$defs/a__b__Put" });
+		document.$defs.a__b__Put = {
+			...document.$defs.a__b__Get,
+			properties: {
+				...(document.$defs.a__b__Get?.properties as object),
+				payload: { $ref: "#/$defs/a__b__Item" },
+				success: { $ref: "#/$defs/a__b__Stored" },
+			},
+		};
+		document.$defs.a__b__Item = {
+			type: "object",
+			properties: { pair: { $ref: "#/$defs/a__b__Pair" } },
+			required: ["pair"],
+		};
+		document.$defs.a__b__Stored = {
+			type: "object",
+			properties: { id: { type: "string" } },
+			required: ["id"],
+		};
+		return document;
 	};
 
-	test("reads a tuple of methods as one protocol", () => {
-		const protocol = normalize(schema);
-		expect(protocol.namespace).toBe("a");
-		expect(protocol.procedures).toEqual([
-			{
-				name: "Get",
-				payload: "Query",
-				success: "Found",
-				errors: ["Gone", "Busy"],
-			},
-			{
-				name: "Put",
-				payload: "Item",
-				success: "Stored",
-				errors: ["Full", "Busy"],
-			},
-		]);
-	});
-
-	test("declares a shared error once, before the namespaces", () => {
-		const declarations = source.match(/export class Busy extends/g) ?? [];
-		expect(declarations).toHaveLength(1);
-		expect(source.indexOf("export class Busy extends")).toBeLessThan(
+	test("declares it once, before the namespaces", () => {
+		const source = emitted(shared());
+		expect(source.match(/export const Pair = /g)).toHaveLength(1);
+		expect(source.indexOf("export const Pair = ")).toBeLessThan(
 			source.indexOf("export namespace"),
 		);
-		expect(block("Get")).not.toContain("class Busy");
-		expect(block("Put")).not.toContain("class Busy");
 	});
 
-	test("keeps an error only one method has in its namespace", () => {
-		expect(block("Get")).toContain("export class Gone extends");
-		expect(block("Put")).toContain("export class Full extends");
-		expect(block("Get")).not.toContain("Full");
-		expect(block("Put")).not.toContain("Gone");
-	});
-
-	test("refers to the shared class from each Failure", () => {
-		expect(block("Get")).toContain(
-			"export const Failure = Schema.Union([Gone, Busy]);",
-		);
-		expect(block("Put")).toContain(
-			"export const Failure = Schema.Union([Full, Busy]);",
-		);
-		expect(source).toContain("return `busy, try again`;");
-	});
-
-	test("still requires a shared error's message template", () => {
-		const untemplated = structuredClone(schema);
-		delete untemplated.$defs.a__Busy__tagged?.["x-message"];
-		expect(() => normalize(untemplated)).toThrow(
-			/Busy has no message template/,
-		);
-	});
-
-	test("still rejects a shared error's unknown placeholder", () => {
-		const misnamed = structuredClone(schema);
-		Object.assign(misnamed.$defs.a__Busy__tagged ?? {}, {
-			"x-message": "busy with {job}",
-		});
-		expect(() => normalize(misnamed)).toThrow(
-			"Busy's message names {job}, but Busy has no such field (it has none)",
-		);
-	});
-
-	test("still rejects a shared error's reserved field", () => {
-		const shadowing = structuredClone(schema);
-		Object.assign(shadowing.$defs.a__Busy__tagged?.properties as object, {
-			cause: { type: "string" },
-		});
-		expect(() => normalize(shadowing)).toThrow(
-			"Busy.cause would shadow Error.cause; rename the field",
-		);
+	test("gives each method its own Path and InvalidRequest", async () => {
+		const { Get, Put } = await load(shared());
+		expect(Schema.is(Put.Path)(["pair", "input"])).toBe(true);
+		expect(Schema.is(Get.Path)(["pair", "input"])).toBe(false);
+		expect(Put.InvalidRequest).not.toBe(Get.InvalidRequest);
 	});
 
 	test("fails on a payload two methods share, rather than name it twice", () => {
-		const sharing = structuredClone(schema);
-		sharing.$defs.a__Put = method("Query", "Stored", ["Full"]);
-		expect(() => emit(normalize(sharing), ["header"])).toThrow(
+		const document = shared();
+		Object.assign(document.$defs.a__b__Put?.properties as object, {
+			payload: { $ref: "#/$defs/a__b__Query" },
+		});
+		expect(() => emitted(document)).toThrow(
 			"Query is used by Get and Put, but Get declares it as Request",
 		);
 	});

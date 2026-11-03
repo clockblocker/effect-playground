@@ -124,15 +124,25 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 		);
 	});
 
-	test("answers a typed failure with a tool error carrying its message", async () => {
-		expect(await callCustomCat("config.json", "copy.txt")).toEqual({
+	test("answers an InvalidRequest with a tool error, a line per issue", async () => {
+		expect(await callCustomCat("config.json", "x.json")).toEqual({
 			content: [
-				{ type: "text", text: '"config.json" is not a .txt file' },
+				{
+					type: "text",
+					text:
+						'inputFile: "config.json" is not a .txt file\n' +
+						'outputFile: "x.json" is not a .txt file',
+				},
 			],
 			isError: true,
 		});
 		expect(await callCustomCat("missing.txt", "copy.txt")).toEqual({
-			content: [{ type: "text", text: '"missing.txt" does not exist' }],
+			content: [
+				{
+					type: "text",
+					text: 'inputFile: "missing.txt" does not exist',
+				},
+			],
 			isError: true,
 		});
 	});

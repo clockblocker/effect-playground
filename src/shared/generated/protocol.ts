@@ -9,26 +9,44 @@
 
 import { Schema } from "effect";
 
-export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()("NotTxtFile", {
-	/** The requested name, which does not end in .txt. */
-	file: Schema.String,
-}) {
-	override get message(): string {
-		return `"${this.file}" is not a .txt file`;
-	}
-}
-
-export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
+/** What an issue says is wrong with a field. */
+export const IssueCode = Schema.Literals([
+	"Missing",
+	"TooShort",
+	"TooLong",
+	"NotTxtFile",
 	"FileNotFound",
-	{
-		/** The requested name; no such .txt file exists. */
-		file: Schema.String,
-	},
-) {
-	override get message(): string {
-		return `"${this.file}" does not exist`;
-	}
-}
+]);
+export type IssueCode = typeof IssueCode.Type;
+
+/** Each issue code's message, from the C++ template of its rule. */
+export const IssueMessage = {
+	Missing: () => "Required",
+	TooShort: ({ limit }: { readonly limit: number }) =>
+		`Must be at least ${limit} characters long`,
+	TooLong: ({ limit }: { readonly limit: number }) =>
+		`Must be at most ${limit} characters long`,
+	NotTxtFile: ({ value }: { readonly value: string }) =>
+		`"${value}" is not a .txt file`,
+	FileNotFound: ({ value }: { readonly value: string }) =>
+		`"${value}" does not exist`,
+} as const;
+
+type Segments = ReadonlyArray<string | number>;
+
+/** The react-hook-form name of the field at a path: `["files", 2, "input"]` → `"files.2.input"`. */
+export type FieldOf<P extends Segments> = P extends readonly [
+	infer Head extends string | number,
+	...infer Rest extends Segments,
+]
+	? Rest extends readonly []
+		? `${Head}`
+		: `${Head}.${FieldOf<Rest>}`
+	: never;
+
+/** The react-hook-form name of the field an issue's path points at. */
+export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
+	path.join(".") as FieldOf<P>;
 
 /** What the ReadFile method takes, succeeds with and fails with. */
 export namespace ReadFile {
@@ -40,10 +58,10 @@ export namespace ReadFile {
 		 */
 		name: Schema.String.check(
 			Schema.isMinCodePoints(5, {
-				message: "Must be at least 5 characters long",
+				message: IssueMessage.TooShort({ limit: 5 }),
 			}),
 			Schema.isMaxCodePoints(25, {
-				message: "Must be at most 25 characters long",
+				message: IssueMessage.TooLong({ limit: 25 }),
 			}),
 		),
 	});
@@ -56,9 +74,37 @@ export namespace ReadFile {
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
 
-	/** Every error ReadFile can fail with. */
-	export const Failure = Schema.Union([NotTxtFile, FileNotFound]);
-	export type Failure = typeof Failure.Type;
+	/** Where in a ReadFile request a field is, one path per field. */
+	export const Path = Schema.Tuple([Schema.Literal("name")]);
+	export type Path = typeof Path.Type;
+
+	/** A problem with a field of a ReadFile request. */
+	export const Issue = Schema.Struct({
+		/** What is wrong. */
+		code: IssueCode,
+		/** What is wrong, in a sentence. */
+		message: Schema.String,
+		/** Where the field is in the request, such as ["files", 2, "input"]. */
+		path: Path,
+	});
+	export interface Issue extends Schema.Schema.Type<typeof Issue> {}
+
+	/** What is wrong with a ReadFile request's fields. */
+	export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()(
+		"InvalidRequest",
+		{
+			/** Every problem with the request's fields, one per failed rule. */
+			issues: Schema.NonEmptyArray(Issue),
+		},
+	) {
+		override get message(): string {
+			return this.issues.map((issue) => issue.message).join("; ");
+		}
+	}
+
+	/** What ReadFile fails with. */
+	export const Failure = InvalidRequest;
+	export type Failure = InvalidRequest;
 }
 
 /** What the CustomCat method takes, succeeds with and fails with. */
@@ -71,10 +117,10 @@ export namespace CustomCat {
 		 */
 		inputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
-				message: "Must be at least 5 characters long",
+				message: IssueMessage.TooShort({ limit: 5 }),
 			}),
 			Schema.isMaxCodePoints(25, {
-				message: "Must be at most 25 characters long",
+				message: IssueMessage.TooLong({ limit: 25 }),
 			}),
 		),
 		/**
@@ -83,10 +129,10 @@ export namespace CustomCat {
 		 */
 		outputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
-				message: "Must be at least 5 characters long",
+				message: IssueMessage.TooShort({ limit: 5 }),
 			}),
 			Schema.isMaxCodePoints(25, {
-				message: "Must be at most 25 characters long",
+				message: IssueMessage.TooLong({ limit: 25 }),
 			}),
 		),
 	});
@@ -99,7 +145,38 @@ export namespace CustomCat {
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
 
-	/** Every error CustomCat can fail with. */
-	export const Failure = Schema.Union([NotTxtFile, FileNotFound]);
-	export type Failure = typeof Failure.Type;
+	/** Where in a CustomCat request a field is, one path per field. */
+	export const Path = Schema.Union([
+		Schema.Tuple([Schema.Literal("inputFile")]),
+		Schema.Tuple([Schema.Literal("outputFile")]),
+	]);
+	export type Path = typeof Path.Type;
+
+	/** A problem with a field of a CustomCat request. */
+	export const Issue = Schema.Struct({
+		/** What is wrong. */
+		code: IssueCode,
+		/** What is wrong, in a sentence. */
+		message: Schema.String,
+		/** Where the field is in the request, such as ["files", 2, "input"]. */
+		path: Path,
+	});
+	export interface Issue extends Schema.Schema.Type<typeof Issue> {}
+
+	/** What is wrong with a CustomCat request's fields. */
+	export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()(
+		"InvalidRequest",
+		{
+			/** Every problem with the request's fields, one per failed rule. */
+			issues: Schema.NonEmptyArray(Issue),
+		},
+	) {
+		override get message(): string {
+			return this.issues.map((issue) => issue.message).join("; ");
+		}
+	}
+
+	/** What CustomCat fails with. */
+	export const Failure = InvalidRequest;
+	export type Failure = InvalidRequest;
 }

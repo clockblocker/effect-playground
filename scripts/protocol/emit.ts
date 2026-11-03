@@ -1,6 +1,7 @@
 import { SchemaRepresentation } from "effect";
 import {
 	type Definition,
+	type IssueTemplate,
 	type Procedure,
 	type Protocol,
 	placeholder,
@@ -11,10 +12,11 @@ import {
  * after the C++ namespace, such as `protocol.ts`.
  *
  * Each procedure gets a TypeScript namespace of its own name. In it, its
- * payload is `Request`, its success `Success` and its error union `Failure`,
- * and every other definition only it uses, such as an error class, keeps its
- * own name. A definition more than one procedure uses, such as an error both
- * fail with, is declared once, before the namespaces, so it has one name.
+ * payload is `Request` and its success `Success`; `Path` lists where in a
+ * request a field is, `Issue` is a problem with one, and `InvalidRequest`,
+ * its `Failure`, holds them. Every other definition only it uses keeps its
+ * own name. A definition more than one procedure uses is declared once,
+ * before the namespaces, as are the issue codes and their messages.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -25,12 +27,12 @@ export function emit(
 	protocol: Protocol,
 	header: readonly string[],
 ): { readonly file: string; readonly source: string } {
-	const { namespace, procedures, definitions } = protocol;
+	const { namespace, procedures, definitions, issues } = protocol;
 
 	const uses = procedures.map((procedure) => ({
 		procedure,
 		names: dependencyOrder(
-			[procedure.payload, procedure.success, ...procedure.errors],
+			[procedure.payload, procedure.success],
 			definitions,
 		),
 	}));
@@ -52,7 +54,12 @@ export function emit(
 			throw new Error(
 				`${name} is used by ${by}, but ${owner.name} declares it as ` +
 					`${owner.payload === name ? "Request" : "Success"}; the ` +
-					"generator can only share other definitions, such as errors",
+					"generator can only share other definitions",
+			);
+		}
+		if ((topLevelNames as readonly string[]).includes(name)) {
+			throw new Error(
+				`${name} would clash with the generated ${name}; rename the struct`,
 			);
 		}
 	}
@@ -69,11 +76,12 @@ export function emit(
 		"",
 		'import { Schema } from "effect";',
 		"",
+		issueDeclarations(issues),
 		...sharedNames.map((name) =>
-			declare(required(definitions, name), definitions),
+			declare(required(definitions, name), definitions, issues),
 		),
 		...uses.map(({ procedure, names }) =>
-			procedureNamespace(procedure, names, shared, definitions),
+			procedureNamespace(procedure, names, shared, protocol),
 		),
 	].join("\n");
 	return {
@@ -89,15 +97,92 @@ const namespaceNote = [
 	"What more than one method uses is declared once, before the namespaces.",
 ];
 
-/** The names a procedure's namespace gives its payload, success and errors. */
-const roleNames = ["Request", "Success", "Failure"] as const;
+/** The names a procedure's namespace declares itself. */
+const roleNames = [
+	"Request",
+	"Success",
+	"Path",
+	"Issue",
+	"InvalidRequest",
+	"Failure",
+] as const;
+
+/** The names declared before the namespaces, whatever the protocol. */
+const topLevelNames = [
+	"IssueCode",
+	"IssueMessage",
+	"FieldOf",
+	"fieldOf",
+] as const;
+
+/**
+ * `IssueCode`, `IssueMessage` with a function per code that fills in its
+ * template, and `fieldOf`, which names an issue's field the way
+ * react-hook-form does.
+ */
+function issueDeclarations(issues: readonly IssueTemplate[]): string {
+	const message = ({ code, message }: IssueTemplate) => {
+		const names = [
+			...new Set(
+				[...message.matchAll(placeholder)].map(([, name = ""]) => name),
+			),
+		];
+		const parameter =
+			names.length === 0
+				? ""
+				: `{ ${names.join(", ")} }: { ${names
+						.map(
+							(name) =>
+								`readonly ${name}: ${name === "value" ? "string" : "number"}`,
+						)
+						.join("; ")} }`;
+		const body =
+			names.length === 0
+				? JSON.stringify(message)
+				: templateCode(message);
+		return `${code}: (${parameter}) => ${body},`;
+	};
+	return [
+		"/** What an issue says is wrong with a field. */",
+		`export const IssueCode = Schema.Literals([${issues
+			.map(({ code }) => JSON.stringify(code))
+			.join(", ")}]);`,
+		"export type IssueCode = typeof IssueCode.Type;",
+		"",
+		"/** Each issue code's message, from the C++ template of its rule. */",
+		"export const IssueMessage = {",
+		...issues.map(message),
+		"} as const;",
+		"",
+		fieldOfCode,
+	].join("\n");
+}
+
+// The same for every protocol: react-hook-form names a field by its path.
+const fieldOfCode = `type Segments = ReadonlyArray<string | number>;
+
+/** The react-hook-form name of the field at a path: \`["files", 2, "input"]\` → \`"files.2.input"\`. */
+export type FieldOf<P extends Segments> = P extends readonly [
+	infer Head extends string | number,
+	...infer Rest extends Segments,
+]
+	? Rest extends readonly []
+		? \`\${Head}\`
+		: \`\${Head}.\${FieldOf<Rest>}\`
+	: never;
+
+/** The react-hook-form name of the field an issue's path points at. */
+export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
+	path.join(".") as FieldOf<P>;
+`;
 
 function procedureNamespace(
 	procedure: Procedure,
 	names: readonly string[],
 	shared: ReadonlySet<string>,
-	definitions: ReadonlyMap<string, Definition>,
+	protocol: Protocol,
 ): string {
+	const { definitions, issues } = protocol;
 	const { payload, success } = procedure;
 	for (const name of names) {
 		if (
@@ -133,7 +218,12 @@ function procedureNamespace(
 	const declarations = names
 		.filter((name) => !shared.has(name))
 		.map((name) =>
-			declare(required(definitions, name), definitions, roles.get(name)),
+			declare(
+				required(definitions, name),
+				definitions,
+				issues,
+				roles.get(name),
+			),
 		);
 	const sameStruct =
 		success === payload
@@ -150,12 +240,138 @@ function procedureNamespace(
 		`export namespace ${procedure.name} {`,
 		...declarations,
 		...sameStruct,
-		`/** Every error ${procedure.name} can fail with. */`,
-		`export const Failure = Schema.Union([${procedure.errors.join(", ")}]);`,
-		"export type Failure = typeof Failure.Type;",
+		pathDeclaration(procedure, definitions),
+		issueDeclaration(procedure, protocol.issue),
+		invalidRequestDeclaration(procedure, protocol.invalidRequest),
+		`/** What ${procedure.name} fails with. */`,
+		"export const Failure = InvalidRequest;",
+		"export type Failure = InvalidRequest;",
 		"}",
 		"",
 	].join("\n");
+}
+
+/** A field name, or `index` for any element of an array. */
+type Segment = { readonly field: string } | "index";
+
+/**
+ * Every path from the payload to a field that holds a value: through a
+ * struct's fields, and through an array's elements by index.
+ */
+function leafPaths(
+	schema: Record<string, unknown>,
+	definitions: ReadonlyMap<string, Definition>,
+	seen: ReadonlySet<string> = new Set(),
+): Segment[][] {
+	const ref = schema.$ref;
+	if (typeof ref === "string") {
+		const name = ref.slice("#/$defs/".length);
+		if (seen.has(name)) {
+			throw new Error(`${name} contains itself, so its paths never end`);
+		}
+		const definition = required(definitions, name);
+		if (definition.schema.type !== "object") return [[]];
+		return leafPaths(
+			definition.schema as Record<string, unknown>,
+			definitions,
+			new Set([...seen, name]),
+		);
+	}
+	if (schema.type === "array" && typeof schema.items === "object") {
+		return leafPaths(
+			schema.items as Record<string, unknown>,
+			definitions,
+			seen,
+		).map((path) => ["index", ...path]);
+	}
+	if (schema.type === "object" && typeof schema.properties === "object") {
+		return Object.entries(
+			schema.properties as Record<string, Record<string, unknown>>,
+		).flatMap(([field, property]) =>
+			leafPaths(property, definitions, seen).map((path) => [
+				{ field },
+				...path,
+			]),
+		);
+	}
+	return [[]];
+}
+
+function pathDeclaration(
+	procedure: Procedure,
+	definitions: ReadonlyMap<string, Definition>,
+): string {
+	const paths = leafPaths(
+		{ $ref: `#/$defs/${procedure.payload}` },
+		definitions,
+	).filter((path) => path.length > 0);
+	if (paths.length === 0) {
+		throw new Error(
+			`${procedure.payload} has no fields, so no issue has a path`,
+		);
+	}
+	const tuples = paths.map(
+		(path) =>
+			`Schema.Tuple([${path
+				.map((segment) =>
+					segment === "index"
+						? "Schema.Int"
+						: `Schema.Literal(${JSON.stringify(segment.field)})`,
+				)
+				.join(", ")}])`,
+	);
+	return [
+		`/** Where in a ${procedure.name} request a field is, one path per field. */`,
+		`export const Path = ${
+			tuples.length === 1
+				? tuples[0]
+				: `Schema.Union([${tuples.join(", ")}])`
+		};`,
+		"export type Path = typeof Path.Type;",
+		"",
+	].join("\n");
+}
+
+function issueDeclaration(procedure: Procedure, issue: Definition): string {
+	const field = (name: string, code: string) => [
+		...docOf(issue, name),
+		`${name}: ${code},`,
+	];
+	return [
+		`/** A problem with a field of a ${procedure.name} request. */`,
+		"export const Issue = Schema.Struct({",
+		...field("code", "IssueCode"),
+		...field("message", "Schema.String"),
+		...field("path", "Path"),
+		"});",
+		"export interface Issue extends Schema.Schema.Type<typeof Issue> {}",
+		"",
+	].join("\n");
+}
+
+function invalidRequestDeclaration(
+	procedure: Procedure,
+	invalidRequest: Definition,
+): string {
+	return [
+		`/** What is wrong with a ${procedure.name} request's fields. */`,
+		'export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {',
+		...docOf(invalidRequest, "issues"),
+		"issues: Schema.NonEmptyArray(Issue),",
+		"}) {",
+		// A getter, not a field: the message never crosses the wire, and
+		// every decoded instance still has it.
+		"override get message(): string {",
+		'return this.issues.map((issue) => issue.message).join("; ");',
+		"}",
+		"}",
+		"",
+	].join("\n");
+}
+
+function docOf(definition: Definition, field: string): string[] {
+	const doc = definition.docs.get(field);
+	return doc === undefined ? [] : jsDoc(doc);
 }
 
 /**
@@ -165,33 +381,15 @@ function procedureNamespace(
 function declare(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
+	issues: readonly IssueTemplate[],
 	role?: readonly [name: string, doc: string],
 ): string {
-	const { tag } = definition;
-	const fields = fieldsOf(definition, definitions);
-	if (tag !== undefined) {
-		const { name } = definition;
-		if (definition.message === undefined) {
-			throw new Error(`${name} is tagged but has no message template`);
-		}
-		if (role !== undefined) {
-			throw new Error(
-				`${name} is an error, so it can't be a payload or success`,
-			);
-		}
-		return [
-			`export class ${name} extends Schema.TaggedError<${name}>()(${JSON.stringify(tag)}, {`,
-			...fields,
-			"}) {",
-			// A getter, not a field: the message never crosses the wire, and
-			// every decoded instance still has it.
-			"override get message(): string {",
-			`return ${messageCode(definition.message)};`,
-			"}",
-			"}",
-			"",
-		].join("\n");
+	if (definition.tag !== undefined) {
+		throw new Error(
+			`${definition.name} is tagged, but only InvalidRequest can be`,
+		);
 	}
+	const fields = fieldsOf(definition, definitions, issues);
 	const [name, doc] = role ?? [definition.name];
 	return [
 		...(doc === undefined ? [] : [`/** ${doc} */`]),
@@ -205,12 +403,12 @@ function declare(
 	].join("\n");
 }
 
-/** `"{file}" is not a .txt file` → a template literal over `this.file`. */
-function messageCode(template: string): string {
+/** `"{value}" is not a .txt file` → a template literal over `value`. */
+function templateCode(template: string): string {
 	const parts = template.split(placeholder);
 	const code = parts.map((part, index) =>
 		index % 2 === 1
-			? `\${this.${part}}`
+			? `\${${part}}`
 			: part
 					.replaceAll("\\", "\\\\")
 					.replaceAll("`", "\\`")
@@ -222,6 +420,7 @@ function messageCode(template: string): string {
 function fieldsOf(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
+	issues: readonly IssueTemplate[],
 ): string[] {
 	const properties = definition.schema.properties as Record<
 		string,
@@ -231,11 +430,9 @@ function fieldsOf(
 		definition.schema.required as string[] | undefined,
 	);
 	return Object.entries(properties).flatMap(([field, schema]) => {
-		if (definition.tag !== undefined && field === "_tag") return [];
-		const code = fieldCode(schema, definitions);
-		const doc = definition.docs.get(field);
+		const code = fieldCode(schema, definitions, issues);
 		return [
-			...(doc === undefined ? [] : jsDoc(doc)),
+			...docOf(definition, field),
 			`${field}: ${required.has(field) ? code : `Schema.optionalKey(${code})`},`,
 		];
 	});
@@ -244,6 +441,7 @@ function fieldsOf(
 function fieldCode(
 	schema: Record<string, unknown>,
 	definitions: ReadonlyMap<string, Definition>,
+	issues: readonly IssueTemplate[],
 ): string {
 	const imported = SchemaRepresentation.fromJsonSchemaDocument({
 		dialect: "draft-2020-12",
@@ -263,43 +461,30 @@ function fieldCode(
 	const [root] = code.codes;
 	if (root === undefined) throw new Error("The engine emitted no code");
 	return mergeChecks(
-		shorthands.reduce(
-			(runtime, [spelledOut, shorthand]) =>
-				typeof shorthand === "string"
-					? runtime.replaceAll(spelledOut, shorthand)
-					: runtime.replaceAll(spelledOut, shorthand),
-			root.runtime,
-		),
+		root.runtime
+			.replaceAll(
+				'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
+				"Schema.Int",
+			)
+			.replaceAll(lengthBound, (_, bound = "", limit = "") => {
+				const keyword = bound === "Min" ? "minLength" : "maxLength";
+				const issue = issues.find((issue) => issue.keyword === keyword);
+				if (issue === undefined) {
+					throw new Error(
+						`A field has a ${keyword}, but no issue code's rule carries one`,
+					);
+				}
+				return `Schema.is${bound}CodePoints(${limit}, { message: IssueMessage.${issue.code}({ limit: ${limit} }) })`;
+			}),
 	);
 }
 
-// The engine spells out what a hand-written schema would name: a C++ int
-// arrives as a check that is exactly Schema.Int.
-//
-// A string's minLength and maxLength (from rfl::Size) arrive as code point
-// checks, annotated with the very `expected` text each check has by default.
-// That annotation goes, and the check gets a message a person can read
-// instead of "Expected a string with at least 5 code points". reflect-cpp's
-// JSON Schema has no keyword for a message, so the wording lives here, once
-// for every length bound.
-const shorthands: ReadonlyArray<
-	readonly [
-		string | RegExp,
-		string | ((match: string, ...groups: string[]) => string),
-	]
-> = [
-	[
-		'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
-		"Schema.Int",
-	],
-	[
-		/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g,
-		(_, bound = "", count = "") =>
-			`Schema.is${bound}CodePoints(${count}, { message: ${JSON.stringify(
-				`Must be at ${bound === "Min" ? "least" : "most"} ${count} characters long`,
-			)} })`,
-	],
-];
+// A string's minLength and maxLength (from a rule's rfl::Size) arrive as code
+// point checks, annotated with the very `expected` text each check has by
+// default. That annotation goes, and the check gets the message of the issue
+// code whose rule carries the keyword, as the C++ side words it.
+const lengthBound =
+	/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g;
 
 /**
  * The engine chains one `.check(…)` per check; a hand-written schema passes

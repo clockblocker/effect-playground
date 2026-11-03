@@ -2,7 +2,12 @@ import { useAtom } from "@effect/atom-react";
 import { useForm } from "react-hook-form";
 import type { CustomCat } from "../../shared/generated/protocol.ts";
 import { BffRpcClient } from "../clients.ts";
-import { Outcome, TextField, useSchemaResolver } from "./shared.tsx";
+import {
+	Outcome,
+	setFailure,
+	TextField,
+	useSchemaResolver,
+} from "./shared.tsx";
 
 const customCat = BffRpcClient.mutation("CustomCat");
 
@@ -15,6 +20,7 @@ export function RunCliForm({
 	const {
 		register,
 		handleSubmit,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm({
 		resolver: useSchemaResolver(schema),
@@ -23,7 +29,7 @@ export function RunCliForm({
 	const [result, run] = useAtom(customCat, { mode: "promiseExit" });
 
 	const submit = handleSubmit(async (payload) => {
-		await run({ payload });
+		setFailure(await run({ payload }), setError);
 	});
 
 	return (
@@ -43,7 +49,7 @@ export function RunCliForm({
 					Copy
 				</button>
 			</form>
-			<Outcome result={result}>
+			<Outcome result={result} error={errors.root?.server}>
 				{({ bytesCopied }) => <p>Copied {bytesCopied} bytes.</p>}
 			</Outcome>
 		</section>

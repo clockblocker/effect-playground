@@ -9,19 +9,22 @@ export interface Definition {
 	readonly docs: ReadonlyMap<string, string>;
 	/** Set when the struct is an alternative of an `rfl::TaggedUnion<"_tag", …>`. */
 	readonly tag: string | undefined;
-	/**
-	 * An error's message template, from the struct's `static constexpr
-	 * std::string_view message`, with `{field}` standing for a field's value.
-	 */
-	readonly message: string | undefined;
 }
 
-/** A procedure struct, never sent, naming what it takes, returns and fails with. */
+/** A procedure struct, never sent, naming what it takes and returns. */
 export interface Procedure {
 	readonly name: string;
 	readonly payload: string;
 	readonly success: string;
-	readonly errors: readonly string[];
+}
+
+/** An issue code's message, from the rule that produces it. */
+export interface IssueTemplate {
+	readonly code: string;
+	/** `{value}` stands for the field's value, `{limit}` for the rule's limit. */
+	readonly message: string;
+	/** The JSON Schema keyword that carries the limit, such as `minLength`. */
+	readonly keyword: string | undefined;
 }
 
 export interface Protocol {
@@ -29,13 +32,18 @@ export interface Protocol {
 	readonly namespace: string;
 	readonly procedures: readonly Procedure[];
 	readonly definitions: ReadonlyMap<string, Definition>;
+	/** In the order of the C++ `IssueCode` enum. */
+	readonly issues: readonly IssueTemplate[];
+	/** The `Issue` and `InvalidRequest` structs, which every procedure shares. */
+	readonly issue: Definition;
+	readonly invalidRequest: Definition;
 }
 
 const definitionRef = "#/$defs/";
 const taggedSuffix = "__tagged";
-const messageKeyword = "x-message";
+const issuesKeyword = "x-issues";
 
-/** A `{field}` in a message template; splitting by it alternates text and field. */
+/** A `{name}` in a message template; splitting by it alternates text and name. */
 export const placeholder = /\{([^{}]*)\}/g;
 
 /**
@@ -47,7 +55,7 @@ const errorOwnFields = new Set(["name", "message", "stack", "cause"]);
 /**
  * Reads the JSON Schema that reflect-cpp emits for a procedure struct, or
  * for a `std::tuple` of them, and undoes its encodings: `$defs` keys such as
- * `protocol__NotTxtFile` or `protocol__NotTxtFile__tagged` become C++ names,
+ * `protocol__Issue` or `protocol__InvalidRequest__tagged` become C++ names,
  * and the `_tag` property of a tagged alternative becomes its tag. Fails on
  * any shape the emitter does not support, rather than emitting something
  * wrong.
@@ -105,35 +113,31 @@ export function normalize(document: unknown): Protocol {
 		if (root === undefined) throw new Error(`Unknown root ${ref}`);
 		return { ...root, ...procedure(root.name, definitions) };
 	});
-	const errors = new Set(procedures.flatMap(({ errors }) => errors));
-	for (const name of errors) {
-		const definition = definitions.get(name);
-		if (definition?.tag !== name) {
-			throw new Error(
-				`${name} must be an alternative of rfl::TaggedUnion<"_tag", …>`,
-			);
-		}
-		checkError(definition);
-	}
-	for (const definition of definitions.values()) {
-		if (definition.message !== undefined && !errors.has(definition.name)) {
-			throw new Error(
-				`${definition.name} has a message template, but only errors take one`,
-			);
-		}
-	}
+	const issues = issueTemplates(document[issuesKeyword]);
+	const invalidRequest = required(definitions, "InvalidRequest");
+	const issue = required(definitions, "Issue");
+	checkInvalidRequest(invalidRequest);
+	checkIssue(
+		issue,
+		issues.map(({ code }) => code),
+	);
 
 	for (const { name } of procedures) definitions.delete(name);
+	definitions.delete(invalidRequest.name);
+	definitions.delete(issue.name);
 	return {
 		namespace: procedures[0]?.namespace ?? "",
 		procedures: procedures.map(
 			({ namespace: _, ...procedure }) => procedure,
 		),
 		definitions,
+		issues,
+		issue,
+		invalidRequest,
 	};
 }
 
-/** What a procedure struct's `payload`, `success` and `error` refer to. */
+/** What a procedure struct's `payload` and `success` refer to. */
 function procedure(
 	name: string,
 	definitions: ReadonlyMap<string, Definition>,
@@ -149,8 +153,8 @@ function procedure(
 		}
 		return field;
 	};
-	const refName = (schema: JsonSchema.JsonSchema, role: string) => {
-		const ref = schema.$ref;
+	const refName = (schema: unknown, role: string) => {
+		const ref = Predicate.isObject(schema) ? schema.$ref : undefined;
 		if (typeof ref !== "string" || !ref.startsWith(definitionRef)) {
 			throw new Error(`${name}.${role} must be a struct`);
 		}
@@ -158,25 +162,64 @@ function procedure(
 	};
 	const error = field("error");
 	const alternatives = Array.isArray(error.anyOf) ? error.anyOf : [error];
+	const [only] = alternatives;
+	if (
+		alternatives.length !== 1 ||
+		definitions.get(refName(only, "error"))?.tag !== "InvalidRequest"
+	) {
+		throw new Error(
+			`${name}.error must be rfl::TaggedUnion<"_tag", InvalidRequest>: ` +
+				"a field's problems are issues, and anything else is a defect",
+		);
+	}
 	return {
 		payload: refName(field("payload"), "payload"),
 		success: refName(field("success"), "success"),
-		errors: alternatives.map((alternative) =>
-			refName(
-				Predicate.isObject(alternative) ? alternative : {},
-				"error",
-			),
-		),
 	};
 }
 
 /**
- * An error needs a message template whose every `{field}` is one of its
- * fields, and no field that would shadow `Error`'s own.
+ * The schema's "x-issues": each code's template, whose every `{name}` is
+ * `{value}`, or `{limit}` for a code with a keyword.
  */
-function checkError(definition: Definition): void {
-	const { name, message } = definition;
-	const fields = Object.keys(definition.schema.properties ?? {}).filter(
+function issueTemplates(raw: unknown): IssueTemplate[] {
+	if (!Predicate.isObject(raw) || Object.keys(raw).length === 0) {
+		throw new Error(
+			`Expected the issue codes' templates in "${issuesKeyword}"`,
+		);
+	}
+	return Object.entries(raw).map(([code, entry]) => {
+		const message = Predicate.isObject(entry) ? entry.message : undefined;
+		const keyword = Predicate.isObject(entry) ? entry.keyword : undefined;
+		if (typeof message !== "string") {
+			throw new Error(`${code} has no message template`);
+		}
+		if (keyword !== undefined && typeof keyword !== "string") {
+			throw new Error(`${code}'s keyword must be a string`);
+		}
+		const names = keyword === undefined ? ["value"] : ["value", "limit"];
+		for (const [, name = ""] of message.matchAll(placeholder)) {
+			if (!names.includes(name)) {
+				throw new Error(
+					`${code}'s message names {${name}}, but only ` +
+						`${names.map((n) => `{${n}}`).join(" and ")} can be filled in`,
+				);
+			}
+		}
+		return { code, message, keyword };
+	});
+}
+
+const properties = (definition: Definition) =>
+	(definition.schema.properties ?? {}) as Record<
+		string,
+		Record<string, unknown>
+	>;
+
+/** `{ issues }`, a non-empty array of Issue, and no field `Error` has. */
+function checkInvalidRequest(definition: Definition): void {
+	const { name } = definition;
+	const fields = Object.keys(properties(definition)).filter(
 		(field) => field !== "_tag",
 	);
 	for (const field of fields) {
@@ -186,21 +229,48 @@ function checkError(definition: Definition): void {
 			);
 		}
 	}
-	if (message === undefined) {
+	const issues = properties(definition).issues;
+	const items = issues?.items;
+	if (
+		fields.length !== 1 ||
+		issues?.type !== "array" ||
+		issues.minItems !== 1 ||
+		!Predicate.isObject(items) ||
+		items.$ref !== `${definitionRef}Issue`
+	) {
 		throw new Error(
-			`${name} has no message template: give the C++ struct a ` +
-				`\`static constexpr std::string_view message\`, which the schema ` +
-				`carries as "${messageKeyword}"`,
+			`${name} must have just \`issues\`, a non-empty array of Issue`,
 		);
 	}
-	for (const [, field = ""] of message.matchAll(placeholder)) {
-		if (!fields.includes(field)) {
-			throw new Error(
-				`${name}'s message names {${field}}, but ${name} has no such ` +
-					`field (it has ${fields.map((f) => `{${f}}`).join(", ") || "none"})`,
-			);
-		}
+}
+
+/** `{ code, message, path }`, its codes those that have templates. */
+function checkIssue(definition: Definition, codes: readonly string[]): void {
+	const { code, message, path } = properties(definition);
+	const fields = Object.keys(properties(definition));
+	if (
+		fields.length !== 3 ||
+		message?.type !== "string" ||
+		path?.type !== "array"
+	) {
+		throw new Error(
+			"Issue must have just `code`, `message` (a string) and `path` (an array)",
+		);
 	}
+	if (JSON.stringify(code?.enum) !== JSON.stringify(codes)) {
+		throw new Error(
+			`Issue.code must be the enum ${codes.join(", ")}, the codes with templates`,
+		);
+	}
+}
+
+function required(
+	definitions: ReadonlyMap<string, Definition>,
+	name: string,
+): Definition {
+	const definition = definitions.get(name);
+	if (definition === undefined) throw new Error(`No definition ${name}`);
+	return definition;
 }
 
 function normalizeDefinition(
@@ -214,10 +284,6 @@ function normalizeDefinition(
 		!Predicate.isObject(raw.properties)
 	) {
 		throw new Error(`${name} must be a struct`);
-	}
-	const { [messageKeyword]: message, ...definition } = raw;
-	if (message !== undefined && typeof message !== "string") {
-		throw new Error(`${name}'s ${messageKeyword} must be a string`);
 	}
 	const docs = new Map<string, string>();
 	const properties: Record<string, JsonSchema.JsonSchema> = {};
@@ -236,10 +302,9 @@ function normalizeDefinition(
 	}
 	return {
 		name,
-		schema: { ...definition, properties, additionalProperties: false },
+		schema: { ...raw, properties, additionalProperties: false },
 		docs,
 		tag,
-		message,
 	};
 }
 

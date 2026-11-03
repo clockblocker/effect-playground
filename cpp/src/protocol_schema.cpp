@@ -1,16 +1,19 @@
 // protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
-// emits, plus each error's message template as "x-message". reflect-cpp only
-// describes fields, and the template is a static member.
+// emits, plus "x-issues": each issue code's message template, and for a rule
+// with a Schema, the keyword that carries its limit, such as "minLength".
+// reflect-cpp only describes fields, and the rules live on types.
 
 #include <iostream>
+#include <map>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <stdexcept>
-#include <string_view>
+#include <string>
 #include <tuple>
 #include <type_traits>
 
 #include "protocol.hpp"
+#include "validate.hpp"
 
 namespace {
 
@@ -24,47 +27,53 @@ Generic::Object& object(Generic& value, std::string_view what) {
 	return *result;
 }
 
-// reflect-cpp's $defs key for an alternative of an rfl::TaggedUnion:
-// "protocol::NotTxtFile" → "protocol__NotTxtFile__tagged".
-template <class Error>
-std::string tagged_key() {
-	std::string key = rfl::type_name_t<Error>().str();
-	for (auto at = key.find("::"); at != std::string::npos;
-		 at = key.find("::", at)) {
-		key.replace(at, 2, "__");
+// The one keyword besides "type" in the schema of a string with just this
+// rule's constraint: {"type":"string","minLength":5} → "minLength".
+template <class Rule>
+std::string keyword() {
+	auto schema =
+		rfl::json::read<Generic>(
+			rfl::json::to_schema<rfl::Validator<std::string, typename Rule::Schema>>())
+			.value();
+	std::string found;
+	for (const auto& [key, _] : object(schema, "a rule's schema")) {
+		if (key == "$schema" || key == "$defs" || key == "type") continue;
+		if (!found.empty()) throw std::runtime_error("two keywords: " + key);
+		found = key;
 	}
-	return key + "__tagged";
+	if (found.empty()) throw std::runtime_error("a rule's Schema has no keyword");
+	return found;
 }
 
-// Puts "x-message" right after the definition's "type", once for an error
-// more than one procedure fails with.
-void add_message(Generic::Object& defs, const std::string& key,
-				 std::string_view message) {
-	if (defs.count(key) == 0) throw std::runtime_error("no definition " + key);
-	auto& definition = object(defs[key], key);
-	if (definition.count("x-message") != 0) return;
-	Generic::Object with_message;
-	for (const auto& [field, value] : definition) {
-		with_message.insert(field, value);
-		if (field == "type") {
-			with_message.insert(std::string("x-message"),
-								Generic(std::string(message)));
+using Templates = std::map<std::string, Generic::Object>;
+
+template <class Request>
+void add_templates(Templates& templates) {
+	validate::for_each_rule<Request>([&]<class Rule>() {
+		const auto code = rfl::enum_to_string(Rule::code);
+		Generic::Object entry;
+		entry["message"] = std::string(Rule::message);
+		if constexpr (checked::HasSchema<Rule>) entry["keyword"] = keyword<Rule>();
+		const auto [at, added] = templates.emplace(code, entry);
+		if (!added && rfl::json::write(at->second) != rfl::json::write(entry)) {
+			throw std::runtime_error(code + " has two message templates");
 		}
-	}
-	definition = std::move(with_message);
-}
-
-template <rfl::internal::StringLiteral discriminator, class... Errors>
-void add_messages(Generic::Object& defs,
-				  std::type_identity<rfl::TaggedUnion<discriminator, Errors...>>) {
-	(add_message(defs, tagged_key<Errors>(), Errors::message), ...);
+	});
 }
 
 template <class... Procedures>
-void add_messages(Generic::Object& defs,
-				  std::type_identity<std::tuple<Procedures...>>) {
-	(add_messages(defs, std::type_identity<decltype(Procedures::error)>()),
-	 ...);
+Generic::Object issues(std::type_identity<std::tuple<Procedures...>>) {
+	Templates templates;
+	(add_templates<decltype(Procedures::payload)>(templates), ...);
+	Generic::Object result;
+	for (const auto& [code, name] : rfl::get_enumerator_array<protocol::IssueCode>()) {
+		const auto entry = templates.find(std::string(code));
+		if (entry == templates.end()) {
+			throw std::runtime_error(std::string(code) + " has no rule");
+		}
+		result[std::string(code)] = entry->second;
+	}
+	return result;
 }
 
 }  // namespace
@@ -74,7 +83,7 @@ int main() {
 	auto document = rfl::json::read<Generic>(
 						rfl::json::to_schema<Procedures, protocol::Wire>())
 						.value();
-	auto& defs = object(object(document, "the schema")["$defs"], "$defs");
-	add_messages(defs, std::type_identity<Procedures>());
+	object(document, "the schema")["x-issues"] =
+		issues(std::type_identity<Procedures>());
 	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";
 }

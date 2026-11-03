@@ -1,30 +1,59 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
-import { Match, Schema } from "effect";
+import { Cause, Exit, Option, Schema } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import type { RpcClientError } from "effect/rpc";
 import { type ReactNode, useId, useMemo } from "react";
 import type {
+	ErrorOption,
 	FieldError,
 	FieldValues,
 	Resolver,
 	UseFormRegisterReturn,
 } from "react-hook-form";
-import type {
-	FileNotFound,
-	NotTxtFile,
-} from "../../shared/generated/protocol.ts";
+import { type FieldOf, fieldOf } from "../../shared/generated/protocol.ts";
 
-/** What either form's mutation can fail with. */
-type Failure = NotTxtFile | FileNotFound | RpcClientError.RpcClientError;
+/** What a form's mutation fails with: its method's InvalidRequest, or the transport's error. */
+type Failure<Path extends ReadonlyArray<string | number>> =
+	| {
+			readonly _tag: "InvalidRequest";
+			readonly issues: ReadonlyArray<{
+				readonly path: Path;
+				readonly message: string;
+			}>;
+	  }
+	| RpcClientError.RpcClientError;
 
 /**
- * What the page says when a call fails. The domain errors say it themselves;
- * the transport error is the client's own, so its wording lives here.
+ * Puts a failed submit on the form: each issue under its field, where the
+ * resolver's errors go, and anything else as `root.server`, which `Outcome`
+ * shows. react-hook-form drops them all on the next submit, and a field's
+ * when its value changes and passes the resolver.
  */
-const describeFailure = Match.type<Failure>().pipe(
-	Match.tag("RpcClientError", (error) => `Request failed: ${error.message}`),
-	Match.orElse((error) => error.message),
-);
+export function setFailure<Path extends ReadonlyArray<string | number>>(
+	exit: Exit.Exit<unknown, Failure<Path>>,
+	setError: (name: FieldOf<Path> | "root.server", error: ErrorOption) => void,
+): void {
+	if (Exit.isSuccess(exit)) return;
+	const failure = Cause.findErrorOption(exit.cause);
+	if (Option.isNone(failure)) {
+		// No typed error in the cause: a defect or an interruption.
+		setError("root.server", { message: "Something went wrong." });
+	} else if (failure.value._tag === "RpcClientError") {
+		// The transport error is the client's own, so its wording lives here.
+		setError("root.server", {
+			message: `Request failed: ${failure.value.message}`,
+		});
+	} else {
+		// The first issue per field, as the resolver does.
+		const named = new Set<string>();
+		for (const { path, message } of failure.value.issues) {
+			const field = fieldOf(path);
+			if (named.has(field)) continue;
+			named.add(field);
+			setError(field, { type: "server", message });
+		}
+	}
+}
 
 /** A react-hook-form resolver that validates against `schema`. */
 export function useSchemaResolver<
@@ -73,19 +102,16 @@ export function TextField({
 	);
 }
 
-/** A mutation's latest result: its success, its failure's wording, or nothing yet. */
+/** A mutation's latest success, or in its place the form's `root.server` error. */
 export function Outcome<A>({
 	result,
+	error,
 	children,
 }: {
-	result: AsyncResult.AsyncResult<A, Failure>;
+	result: AsyncResult.AsyncResult<A, unknown>;
+	error: { readonly message?: string } | undefined;
 	children: (value: A) => ReactNode;
 }) {
-	return AsyncResult.matchWithError(result, {
-		onInitial: () => null,
-		onSuccess: ({ value }) => children(value),
-		onError: (error) => <p role="alert">{describeFailure(error)}</p>,
-		// No typed error in the cause: a defect or an interruption.
-		onDefect: () => <p role="alert">Something went wrong.</p>,
-	});
+	if (error !== undefined) return <p role="alert">{error.message}</p>;
+	return AsyncResult.isSuccess(result) ? children(result.value) : null;
 }

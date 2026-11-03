@@ -1,21 +1,17 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
-import {
-	CustomCat,
-	FileNotFound,
-	NotTxtFile,
-} from "../src/shared/generated/protocol.ts";
+import { CustomCat } from "../src/shared/generated/protocol.ts";
 
 // What the BFF decodes custom_cat's stdout with.
 const success = Schema.decodeUnknownSync(
 	Schema.fromJsonString(CustomCat.Success),
 );
-const failure = Schema.decodeUnknownSync(
-	Schema.fromJsonString(CustomCat.Failure),
+const invalidRequest = Schema.decodeUnknownSync(
+	Schema.fromJsonString(CustomCat.InvalidRequest),
 );
 
 let directory = "";
@@ -75,63 +71,133 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(await file("copy.txt").text()).toBe("Hello\n");
 	});
 
-	test("fails with NotTxtFile for an input that isn't .txt", async () => {
+	test("reports every field that isn't .txt, each under its path", async () => {
 		const result = await customCat(
-			["--input-file=config.json", "--output-file=copy.txt"],
+			["--input-file=config.json", "--output-file=x.json"],
 			{ "config.json": "{}" },
 		);
-		expect(result).toEqual({
-			stdout: '{"_tag":"NotTxtFile","file":"config.json"}\n',
-			stderr: 'custom_cat: "config.json" is not a .txt file\n',
-			exitCode: 1,
-		});
-	});
-
-	test("fails with NotTxtFile for an output that isn't .txt", async () => {
-		const result = await customCat([
-			"--input-file=hello.txt",
-			"--output-file=copy.json",
-		]);
 		expect(result.exitCode).toBe(1);
-		expect(failure(result.stdout)).toEqual(
-			new NotTxtFile({ file: "copy.json" }),
+		expect(result.stderr).toBe("");
+		expect(JSON.parse(result.stdout)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [
+				{
+					code: "NotTxtFile",
+					message: '"config.json" is not a .txt file',
+					path: ["inputFile"],
+				},
+				{
+					code: "NotTxtFile",
+					message: '"x.json" is not a .txt file',
+					path: ["outputFile"],
+				},
+			],
+		});
+		expect(invalidRequest(result.stdout)).toBeInstanceOf(
+			CustomCat.InvalidRequest,
 		);
-		expect(await file("copy.json").exists()).toBe(false);
+		expect(await file("x.json").exists()).toBe(false);
 	});
 
-	test("fails with FileNotFound for a missing input", async () => {
+	test("reports a missing input as FileNotFound", async () => {
 		const result = await customCat([
 			"--input-file=missing.txt",
 			"--output-file=copy.txt",
 		]);
 		expect(result).toEqual({
-			stdout: '{"_tag":"FileNotFound","file":"missing.txt"}\n',
-			stderr: 'custom_cat: "missing.txt" does not exist\n',
+			stdout:
+				'{"_tag":"InvalidRequest","issues":[{"code":"FileNotFound",' +
+				'"message":"\\"missing.txt\\" does not exist","path":["inputFile"]}]}\n',
+			stderr: "",
 			exitCode: 1,
 		});
-		expect(failure(result.stdout)).toBeInstanceOf(FileNotFound);
+		expect(await file("copy.txt").exists()).toBe(false);
 	});
 
-	test("rejects a 4-character name as a bad argument", async () => {
+	test("checks a name's bounds before anything else about it", async () => {
 		const result = await customCat([
 			"--input-file=x.md",
 			"--output-file=copy.txt",
 		]);
-		expect(result).toEqual({
-			stdout: "",
-			stderr:
-				"custom_cat: Failed to parse field 'input-file': Size validation " +
-				"failed: Value expected to be greater than or equal to 5, but got 4.\n",
-			exitCode: 2,
-		});
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				code: "TooShort",
+				message: "Must be at least 5 characters long",
+				path: ["inputFile"],
+			},
+		]);
 	});
 
-	test("rejects a missing flag as a bad argument", async () => {
+	test("reports a name too long", async () => {
+		const result = await customCat([
+			"--input-file=hello.txt",
+			`--output-file=${"a".repeat(23)}.txt`,
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				code: "TooLong",
+				message: "Must be at most 25 characters long",
+				path: ["outputFile"],
+			},
+		]);
+	});
+
+	test("reports both names too short", async () => {
+		const result = await customCat([
+			"--input-file=x.md",
+			"--output-file=y.md",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(
+			invalidRequest(result.stdout).issues.map(({ code, path }) => [
+				code,
+				...path,
+			]),
+		).toEqual([
+			["TooShort", "inputFile"],
+			["TooShort", "outputFile"],
+		]);
+	});
+
+	test("reports a missing flag as Missing, on its field", async () => {
 		const result = await customCat(["--input-file=hello.txt"]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{ code: "Missing", message: "Required", path: ["outputFile"] },
+		]);
+	});
+
+	test("rejects an unknown flag as a usage error", async () => {
+		const result = await customCat([
+			"--input-file=hello.txt",
+			"--output-file=copy.txt",
+			"--verbose",
+		]);
+		expect(result.stdout).toBe("");
 		expect(result.exitCode).toBe(2);
-		expect(result.stderr).toBe(
-			"custom_cat: Field named 'output-file' not found.\n",
+		expect(result.stderr).toStartWith(
+			"custom_cat: Value named 'verbose' not used.",
 		);
+	});
+
+	test("reports a missing x.txt, but a directory named x.txt is a defect", async () => {
+		const result = await customCat([
+			"--input-file=dir.txt",
+			"--output-file=copy.txt",
+		]);
+		mkdirSync(join(directory, "files/dir.txt"));
+		const again = await run([
+			"--input-file=dir.txt",
+			"--output-file=copy.txt",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(again).toEqual({
+			stdout: "",
+			stderr: "custom_cat: cannot read files/dir.txt\n",
+			exitCode: 3,
+		});
 	});
 
 	test("keeps both files in files/, by base name", async () => {

@@ -1,7 +1,17 @@
 import { Effect, Layer } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
-import { CustomCat } from "../shared/generated/protocol.ts";
+import { CustomCat, fieldOf } from "../shared/generated/protocol.ts";
 import { CustomCatCli } from "./custom-cat.ts";
+
+// McpServer makes a failure's message the tool error's text, and an MCP
+// client has no form to put each issue under, so its text names each field.
+class ToolInvalidRequest extends CustomCat.InvalidRequest {
+	override get message(): string {
+		return this.issues
+			.map(({ path, message }) => `${fieldOf(path)}: ${message}`)
+			.join("\n");
+	}
+}
 
 const CustomCatTool = Tool.make("custom_cat", {
 	description:
@@ -17,11 +27,19 @@ const Tools = Toolkit.make(CustomCatTool);
 const ToolHandlers = Tools.toLayer(
 	Effect.gen(function* () {
 		const cli = yield* CustomCatCli;
-		return Tools.of({ custom_cat: (request) => cli.run(request) });
+		return Tools.of({
+			custom_cat: (request) =>
+				cli
+					.run(request)
+					.pipe(
+						Effect.mapError(
+							({ issues }) => new ToolInvalidRequest({ issues }),
+						),
+					),
+		});
 	}),
 );
 
-// A failure's message becomes the tool error's text.
 export const McpRoutes = McpServer.toolkit(Tools).pipe(
 	Layer.provide(ToolHandlers),
 	Layer.provideMerge(

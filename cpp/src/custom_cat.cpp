@@ -2,18 +2,13 @@
 //
 // Copies files/NAME to files/NAME, under the working directory, replacing
 // the output if it exists. The flags are protocol::CustomCatRequest, read by
-// reflect-cpp, which spells its fields in kebab-case.
-//
-// Exit codes:
+// reflect-cpp, which spells its fields in kebab-case. Exit codes:
 //   0  copied: CustomCatSuccess on stdout, as JSON
-//   1  NotTxtFile or FileNotFound: the tagged error on stdout, as JSON, and
-//      its message on stderr
-//   2  bad arguments, such as a missing flag or a name out of bounds:
-//      reflect-cpp's error on stderr
+//   1  a field is wrong: InvalidRequest on stdout, as JSON, with every issue
+//   2  a usage error that names no field, such as an unknown flag: on stderr
 //   3  anything else, such as a directory named x.txt: on stderr
 
 #include <exception>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <rfl/cli.hpp>
@@ -21,40 +16,22 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <system_error>
-#include <variant>
 
-#include "error_message.hpp"
 #include "protocol.hpp"
+#include "validate.hpp"
 
 namespace {
 
 using namespace protocol;
 
-constexpr int exit_error = 1;
+constexpr int exit_invalid = 1;
 constexpr int exit_usage = 2;
 constexpr int exit_defect = 3;
 
-const std::filesystem::path files = "files";
-
-std::variant<CustomCatSuccess, CustomCatError> copy(
-	const CustomCatRequest& request) {
-	const std::string& input = request.input_file().value();
-	const std::string& output = request.output_file().value();
-	for (const auto& name : {input, output}) {
-		if (std::filesystem::path(name).extension() != ".txt") {
-			return NotTxtFile{.file = name};
-		}
-	}
-	const auto from = files / std::filesystem::path(input).filename();
-	const auto to = files / std::filesystem::path(output).filename();
-
-	std::error_code error;
-	const auto status = std::filesystem::status(from, error);
-	if (status.type() == std::filesystem::file_type::not_found) {
-		return FileNotFound{.file = input};
-	}
-	if (error || status.type() != std::filesystem::file_type::regular) {
+CustomCatSuccess copy(const CustomCatRequest& request) {
+	const auto from = in_files(request.input_file().value());
+	const auto to = in_files(request.output_file().value());
+	if (!std::filesystem::is_regular_file(from)) {
 		throw std::runtime_error("cannot read " + from.string());
 	}
 
@@ -75,28 +52,23 @@ std::variant<CustomCatSuccess, CustomCatError> copy(
 }  // namespace
 
 int main(int argc, char* argv[]) {
+	// A missing flag parses too, so that validate() reports it.
 	const auto request =
-		rfl::cli::read<CustomCatRequest, rfl::NoExtraFields>(argc, argv);
+		rfl::cli::read<CustomCatRequest, rfl::NoExtraFields,
+					   rfl::DefaultIfMissing>(argc, argv);
 	if (!request) {
 		std::cerr << "custom_cat: " << request.error().what() << "\n";
 		return exit_usage;
 	}
 	try {
-		const auto outcome = copy(*request);
-		if (const auto* success = std::get_if<CustomCatSuccess>(&outcome)) {
-			std::cout << rfl::json::write<Wire>(*success) << "\n";
-			return 0;
+		if (auto issues = validate::validate(*request); !issues.empty()) {
+			std::cout << rfl::json::write<Wire>(
+							 Error(InvalidRequest{.issues = std::move(issues)}))
+					  << "\n";
+			return exit_invalid;
 		}
-		const auto& failure = std::get<CustomCatError>(outcome);
-		std::cout << rfl::json::write<Wire>(failure) << "\n";
-		std::cerr << "custom_cat: "
-				  << rfl::visit(
-						 [](const auto& error) {
-							 return error_message::fill(error);
-						 },
-						 failure)
-				  << "\n";
-		return exit_error;
+		std::cout << rfl::json::write<Wire>(copy(*request)) << "\n";
+		return 0;
 	} catch (const std::exception& defect) {
 		std::cerr << "custom_cat: " << defect.what() << "\n";
 		return exit_defect;

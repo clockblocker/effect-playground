@@ -23,10 +23,7 @@
                 "error": {
                     "anyOf": [
                         {
-                            "$ref": "#/$defs/protocol__NotTxtFile__tagged"
-                        },
-                        {
-                            "$ref": "#/$defs/protocol__FileNotFound__tagged"
+                            "$ref": "#/$defs/protocol__InvalidRequest__tagged"
                         }
                     ]
                 }
@@ -84,44 +81,66 @@
                 "bytesCopied"
             ]
         },
-        "protocol__FileNotFound__tagged": {
+        "protocol__InvalidRequest__tagged": {
             "type": "object",
-            "x-message": "\"{file}\" does not exist",
             "properties": {
                 "_tag": {
                     "type": "string",
                     "enum": [
+                        "InvalidRequest"
+                    ]
+                },
+                "issues": {
+                    "type": "array",
+                    "description": "Every problem with the request's fields, one per failed rule.",
+                    "items": {
+                        "$ref": "#/$defs/protocol__Issue"
+                    },
+                    "minItems": 1
+                }
+            },
+            "required": [
+                "_tag",
+                "issues"
+            ]
+        },
+        "protocol__Issue": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "What is wrong.",
+                    "enum": [
+                        "Missing",
+                        "TooShort",
+                        "TooLong",
+                        "NotTxtFile",
                         "FileNotFound"
                     ]
                 },
-                "file": {
+                "message": {
                     "type": "string",
-                    "description": "The requested name; no such .txt file exists."
-                }
-            },
-            "required": [
-                "_tag",
-                "file"
-            ]
-        },
-        "protocol__NotTxtFile__tagged": {
-            "type": "object",
-            "x-message": "\"{file}\" is not a .txt file",
-            "properties": {
-                "_tag": {
-                    "type": "string",
-                    "enum": [
-                        "NotTxtFile"
-                    ]
+                    "description": "What is wrong, in a sentence."
                 },
-                "file": {
-                    "type": "string",
-                    "description": "The requested name, which does not end in .txt."
+                "path": {
+                    "type": "array",
+                    "description": "Where the field is in the request, such as [\"files\", 2, \"input\"].",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "integer"
+                            }
+                        ]
+                    }
                 }
             },
             "required": [
-                "_tag",
-                "file"
+                "code",
+                "message",
+                "path"
             ]
         },
         "protocol__ReadFile": {
@@ -136,10 +155,7 @@
                 "error": {
                     "anyOf": [
                         {
-                            "$ref": "#/$defs/protocol__NotTxtFile__tagged"
-                        },
-                        {
-                            "$ref": "#/$defs/protocol__FileNotFound__tagged"
+                            "$ref": "#/$defs/protocol__InvalidRequest__tagged"
                         }
                     ]
                 }
@@ -182,6 +198,25 @@
             "required": [
                 "contents"
             ]
+        }
+    },
+    "x-issues": {
+        "Missing": {
+            "message": "Required"
+        },
+        "TooShort": {
+            "message": "Must be at least {limit} characters long",
+            "keyword": "minLength"
+        },
+        "TooLong": {
+            "message": "Must be at most {limit} characters long",
+            "keyword": "maxLength"
+        },
+        "NotTxtFile": {
+            "message": "\"{value}\" is not a .txt file"
+        },
+        "FileNotFound": {
+            "message": "\"{value}\" does not exist"
         }
     }
 }

@@ -1,16 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Cause, Effect, Exit, Layer, Result } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
 import { CustomCatCli } from "../src/server/custom-cat.ts";
-import {
-	type CustomCat,
-	FileNotFound,
-	NotTxtFile,
-} from "../src/shared/generated/protocol.ts";
+import { CustomCat } from "../src/shared/generated/protocol.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "custom-cat-cli-"));
 
@@ -50,35 +46,43 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 		);
 	});
 
-	test("fails with the generated error classes", async () => {
-		const notTxt = await run({
-			inputFile: "hello.txt",
+	test("fails with the generated InvalidRequest, every issue in it", async () => {
+		const result = await run({
+			inputFile: "missing.txt",
 			outputFile: "copy.json",
 		});
-		expect(notTxt).toEqual(
-			Result.fail(new NotTxtFile({ file: "copy.json" })),
+		expect(result).toEqual(
+			Result.fail(
+				new CustomCat.InvalidRequest({
+					issues: [
+						{
+							code: "FileNotFound",
+							message: '"missing.txt" does not exist',
+							path: ["inputFile"],
+						},
+						{
+							code: "NotTxtFile",
+							message: '"copy.json" is not a .txt file',
+							path: ["outputFile"],
+						},
+					],
+				}),
+			),
 		);
-		expect(Result.isFailure(notTxt) && notTxt.failure).toBeInstanceOf(
-			NotTxtFile,
-		);
-		const missing = await run({
-			inputFile: "missing.txt",
-			outputFile: "copy.txt",
-		});
-		expect(Result.isFailure(missing) && missing.failure).toBeInstanceOf(
-			FileNotFound,
+		expect(Result.isFailure(result) && result.failure).toBeInstanceOf(
+			CustomCat.InvalidRequest,
 		);
 	});
 
-	test("dies on anything but a success or a domain error", async () => {
-		// The schema would reject it first; custom_cat exits with 2.
+	test("dies on anything but a success or an InvalidRequest", async () => {
+		mkdirSync(join(directory, "files/dir.txt"));
 		const exit = await runExit({
-			inputFile: "x.md",
+			inputFile: "dir.txt",
 			outputFile: "copy.txt",
 		});
 		expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
 		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
-			"custom_cat exited with 2: custom_cat: Failed to parse field 'input-file'",
+			"custom_cat exited with 3: custom_cat: cannot read files/dir.txt",
 		);
 	});
 });

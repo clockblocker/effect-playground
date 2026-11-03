@@ -8,8 +8,8 @@ const root = join(import.meta.dirname, "../..");
 const decodeSuccess = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(CustomCat.Success),
 );
-const decodeFailure = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(CustomCat.Failure),
+const decodeInvalidRequest = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(CustomCat.InvalidRequest),
 );
 
 const text = (stream: Stream.Stream<Uint8Array, unknown>) =>
@@ -63,7 +63,9 @@ export class CustomCatCli extends Context.Service<
 							);
 						case 1:
 							return yield* Effect.fail(
-								yield* decodeFailure(stdout).pipe(Effect.orDie),
+								yield* decodeInvalidRequest(stdout).pipe(
+									Effect.orDie,
+								),
 							);
 						default:
 							return yield* Effect.die(

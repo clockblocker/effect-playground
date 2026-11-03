@@ -2,7 +2,12 @@ import { useAtom } from "@effect/atom-react";
 import { useForm } from "react-hook-form";
 import type { ReadFile } from "../../shared/generated/protocol.ts";
 import { BffRpcClient } from "../clients.ts";
-import { Outcome, TextField, useSchemaResolver } from "./shared.tsx";
+import {
+	Outcome,
+	setFailure,
+	TextField,
+	useSchemaResolver,
+} from "./shared.tsx";
 
 const readFile = BffRpcClient.mutation("ReadFile");
 
@@ -15,6 +20,7 @@ export function ReadFileForm({
 	const {
 		register,
 		handleSubmit,
+		setError,
 		formState: { errors, isSubmitting },
 	} = useForm({
 		resolver: useSchemaResolver(schema),
@@ -24,7 +30,7 @@ export function ReadFileForm({
 
 	// Runs only once the values pass the schema, so a bad name sends nothing.
 	const submit = handleSubmit(async (payload) => {
-		await read({ payload });
+		setFailure(await read({ payload }), setError);
 	});
 
 	return (
@@ -39,7 +45,7 @@ export function ReadFileForm({
 					Submit
 				</button>
 			</form>
-			<Outcome result={result}>
+			<Outcome result={result} error={errors.root?.server}>
 				{({ contents }) => <pre>{contents}</pre>}
 			</Outcome>
 		</section>
