@@ -4,6 +4,8 @@
 #include <iostream>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
+#include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "protocol.hpp"
@@ -11,9 +13,22 @@
 
 namespace {
 
+struct Differs;
+
 struct Pair {
 	protocol::Existing input;
 	protocol::FileName output_file;
+
+	using Rules = std::tuple<Differs>;
+};
+
+struct Differs {
+	static constexpr auto code = protocol::IssueCode::SameAsInput;
+	static constexpr std::string_view message = "Must not be the input file";
+	static constexpr auto field = &Pair::output_file;
+	static bool passes(const Pair& pair) {
+		return pair.input.value() != pair.output_file.value();
+	}
 };
 
 struct Batch {

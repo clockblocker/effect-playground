@@ -1,4 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Result } from "effect";
 import { HttpRouter } from "effect/http";
@@ -6,18 +9,23 @@ import { BffReader } from "../src/server/bff-reader.ts";
 import { RestRoutes } from "../src/server/rest.ts";
 import { ReadFile } from "../src/shared/generated/protocol.ts";
 
-// Both read the repository's files/.
-const read = (name: string) =>
-	Effect.runPromise(
-		Effect.gen(function* () {
-			return yield* (yield* BffReader).read(name);
-		}).pipe(
-			Effect.result,
-			Effect.provide(
-				BffReader.layer.pipe(Layer.provide(BunServices.layer)),
+const readIn =
+	(layer: Layer.Layer<BffReader, never, BunServices.BunServices>) =>
+	(name: string) =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				return yield* (yield* BffReader).read(name);
+			}).pipe(
+				Effect.result,
+				Effect.provide(layer.pipe(Layer.provide(BunServices.layer))),
 			),
-		),
-	);
+		);
+
+// Both read the repository's files/.
+const read = readIn(BffReader.layer);
+
+const scratch = mkdtempSync(join(tmpdir(), "bff-"));
+const readScratch = readIn(BffReader.layerIn(scratch));
 
 const { handler, dispose } = HttpRouter.toWebHandler(
 	RestRoutes.pipe(
@@ -34,7 +42,10 @@ const get = async (name: string) => {
 	return { status: response.status, body: await response.text() };
 };
 
-afterAll(dispose);
+afterAll(async () => {
+	await dispose();
+	rmSync(scratch, { recursive: true, force: true });
+});
 
 describe("BffReader", () => {
 	test("reads a .txt file", async () => {
@@ -69,6 +80,38 @@ describe("BffReader", () => {
 	});
 });
 
+describe("BffReader in a files/ of its own", () => {
+	test("refuses a link, wherever it leads", async () => {
+		await Bun.write(join(scratch, "files/hello.txt"), "Hello\n");
+		await Bun.write(join(scratch, "outside.txt"), "Outside\n");
+		symlinkSync(
+			join(scratch, "outside.txt"),
+			join(scratch, "files/out.txt"),
+		);
+		symlinkSync("hello.txt", join(scratch, "files/in.txt"));
+		for (const name of ["out.txt", "in.txt"]) {
+			const result = await readScratch(name);
+			expect(Result.isFailure(result) && result.failure.issues).toEqual([
+				{
+					code: "LeavesFiles",
+					message: `"${name}" is a link, which could lead outside the files directory`,
+					path: ["name"],
+				},
+			]);
+		}
+		expect(await readScratch("hello.txt")).toEqual(
+			Result.succeed({ contents: "Hello\n" }),
+		);
+	});
+
+	test("refuses a path that leads outside, even unchecked", async () => {
+		const result = await readScratch("../outside.txt");
+		expect(Result.isFailure(result) && result.failure.issues[0]?.code).toBe(
+			"LeavesFiles",
+		);
+	});
+});
+
 describe("REST read", () => {
 	test("answers a file with its text", async () => {
 		const { status, body } = await get("hello.txt");
@@ -94,5 +137,6 @@ describe("REST read", () => {
 
 	test("still rejects a name out of bounds before the handler, with 400", async () => {
 		expect((await get("x.md")).status).toBe(400);
+		expect((await get("..%2Fhello.txt")).status).toBe(400);
 	});
 });

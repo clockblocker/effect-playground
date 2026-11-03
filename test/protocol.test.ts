@@ -41,6 +41,17 @@ describe("generated protocol", () => {
 		).toThrow();
 	});
 
+	test("a name must be a plain name, in the C++ rule's words", () => {
+		const accepts = Schema.is(CustomCat.Request.fields.outputFile);
+		expect(accepts("hello.txt")).toBe(true);
+		expect(accepts("..hello.txt")).toBe(true);
+		expect(accepts("../hello.txt")).toBe(false);
+		expect(accepts("dir\\hello.txt")).toBe(false);
+		expect(() =>
+			Schema.decodeUnknownSync(ReadFile.Request)({ name: "a/b.txt" }),
+		).toThrow(IssueMessage.NotPlainName());
+	});
+
 	test("a name must be 5 to 25 characters, in the C++ rules' words", () => {
 		const accepts = Schema.is(ReadFile.Request);
 		expect(accepts({ name: "a".repeat(4) })).toBe(false);
@@ -115,8 +126,12 @@ describe("generated protocol", () => {
 			"Missing",
 			"TooShort",
 			"TooLong",
+			"NotPlainName",
 			"NotTxtFile",
+			"LeavesFiles",
 			"FileNotFound",
+			"SameAsInput",
+			"SameFileAsInput",
 		];
 		expect<readonly string[]>(IssueCode.literals).toEqual(codes);
 		expect(schema.$defs.protocol__Issue.properties.code.enum).toEqual(
@@ -183,8 +198,10 @@ function fixture() {
 					},
 					label: {
 						description: "What the batch is called.",
-						type: "string",
-						minLength: 2,
+						allOf: [
+							{ type: "string", minLength: 2 },
+							{ type: "string", pattern: "^[a-z]*$" },
+						],
 					},
 					limit: { anyOf: [{ type: "integer" }, { type: "null" }] },
 				},
@@ -208,7 +225,7 @@ function fixture() {
 				properties: {
 					code: {
 						type: "string",
-						enum: ["Missing", "TooShort", "Odd"],
+						enum: ["Missing", "TooShort", "Lowercase", "Odd"],
 					},
 					message: { type: "string" },
 					path: {
@@ -236,6 +253,7 @@ function fixture() {
 		"x-issues": {
 			Missing: { message: "Required" },
 			TooShort: { message: "At least {limit}", keyword: "minLength" },
+			Lowercase: { message: "Lowercase only", keyword: "pattern" },
 			// Backticks, $ and \ are literal text in the generated function.
 			Odd: { message: "`{value}` is odd; $ and \\ stay" },
 		} as Record<string, Record<string, unknown>>,
@@ -317,7 +335,12 @@ describe("emitter", () => {
 
 	test("writes each code's template as a function of its placeholders", async () => {
 		const { IssueCode, IssueMessage, fieldOf } = await load(fixture());
-		expect(IssueCode.literals).toEqual(["Missing", "TooShort", "Odd"]);
+		expect(IssueCode.literals).toEqual([
+			"Missing",
+			"TooShort",
+			"Lowercase",
+			"Odd",
+		]);
 		expect(IssueMessage.Missing()).toBe("Required");
 		expect(IssueMessage.TooShort({ limit: 2 })).toBe("At least 2");
 		expect(IssueMessage.Odd({ value: "x" })).toBe(
@@ -334,6 +357,28 @@ describe("emitter", () => {
 		expect(() =>
 			Schema.decodeUnknownSync(Get.Request)({ files: [], label: "a" }),
 		).toThrow("At least 2");
+	});
+
+	test("gives a pattern the message of the code that carries it", async () => {
+		expect(emitted(fixture())).toContain(
+			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase() })',
+		);
+		const { Get } = await load(fixture());
+		expect(() =>
+			Schema.decodeUnknownSync(Get.Request)({ files: [], label: "AB" }),
+		).toThrow("Lowercase only");
+	});
+
+	test("rejects two codes that carry one keyword, or a keyword code that names the value", () => {
+		const document = fixture();
+		document["x-issues"].Odd = { message: "odd", keyword: "pattern" };
+		expect(() => normalize(document)).toThrow(
+			"Lowercase and Odd both carry pattern",
+		);
+		document["x-issues"].Odd = { message: "{value}", keyword: "maxLength" };
+		expect(() => normalize(document)).toThrow(
+			"Odd's message names {value}, but only {limit} can be filled in",
+		);
 	});
 
 	test("rejects a bound no code carries", () => {
@@ -360,7 +405,7 @@ describe("emitter", () => {
 		const document = fixture();
 		delete document["x-issues"].Odd;
 		expect(() => normalize(document)).toThrow(
-			"Issue.code must be the enum Missing, TooShort, the codes with templates",
+			"Issue.code must be the enum Missing, TooShort, Lowercase, the codes with templates",
 		);
 	});
 

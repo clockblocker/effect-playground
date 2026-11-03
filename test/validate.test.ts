@@ -61,6 +61,21 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 		]);
 	});
 
+	test("runs a struct's rules once its fields pass theirs", () => {
+		expect(
+			issues({
+				files: [
+					{ input: "hello.txt", outputFile: "hello.txt" },
+					{ input: "missing.txt", outputFile: "missing.txt" },
+				],
+				label: "label.txt",
+			}),
+		).toEqual([
+			["SameAsInput", "files", 0, "outputFile"],
+			["FileNotFound", "files", 1, "input"],
+		]);
+	});
+
 	test("reports every failed rule of one level, and only that level", () => {
 		expect(
 			issues({

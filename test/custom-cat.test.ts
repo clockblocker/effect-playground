@@ -1,5 +1,13 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+	chmodSync,
+	linkSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -46,7 +54,10 @@ const file = (name: string) => Bun.file(join(directory, "files", name));
 
 describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 	beforeAll(buildCpp, 600_000);
-	afterEach(() => rmSync(directory, { recursive: true, force: true }));
+	afterEach(() => {
+		chmodSync(join(directory, "files"), 0o755);
+		rmSync(directory, { recursive: true, force: true });
+	});
 
 	test("copies the input to the output", async () => {
 		const result = await customCat([
@@ -195,20 +206,156 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(again).toEqual({
 			stdout: "",
-			stderr: "custom_cat: cannot read files/dir.txt\n",
+			stderr: "custom_cat: cannot read files/dir.txt: Is a directory\n",
 			exitCode: 3,
 		});
 	});
 
-	test("keeps both files in files/, by base name", async () => {
+	test("refuses to copy a file onto itself", async () => {
+		const result = await customCat([
+			"--input-file=hello.txt",
+			"--output-file=hello.txt",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				code: "SameAsInput",
+				message: "Must not be the input file",
+				path: ["outputFile"],
+			},
+		]);
+	});
+
+	test("refuses a hard link to the input as the output", async () => {
+		await customCat(["--input-file=hello.txt"]);
+		linkSync(
+			join(directory, "files/hello.txt"),
+			join(directory, "files/same.txt"),
+		);
+		const result = await run([
+			"--input-file=hello.txt",
+			"--output-file=same.txt",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				code: "SameFileAsInput",
+				message: '"same.txt" is the input file under another name',
+				path: ["outputFile"],
+			},
+		]);
+	});
+
+	test("checks the names' own rules before comparing them", async () => {
+		const result = await customCat([
+			"--input-file=missing.txt",
+			"--output-file=missing.txt",
+		]);
+		expect(
+			invalidRequest(result.stdout).issues.map(({ code }) => code),
+		).toEqual(["FileNotFound"]);
+	});
+
+	test("takes a plain name, not a path", async () => {
 		const result = await customCat([
 			"--input-file=../files/hello.txt",
-			"--output-file=../copy.txt",
+			"--output-file=../x.txt",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(
+			invalidRequest(result.stdout).issues.map(({ code, path }) => [
+				code,
+				...path,
+			]),
+		).toEqual([
+			["NotPlainName", "inputFile"],
+			["NotPlainName", "outputFile"],
+		]);
+		expect(await Bun.file(join(directory, "x.txt")).exists()).toBe(false);
+	});
+
+	test("refuses a link in files/, wherever it leads", async () => {
+		await customCat(["--input-file=hello.txt"], {
+			"hello.txt": "Hello\n",
+			"secret.txt": "Secret\n",
+		});
+		const outside = join(directory, "outside.txt");
+		await Bun.write(outside, "Outside\n");
+		symlinkSync(outside, join(directory, "files/out.txt"));
+		symlinkSync("secret.txt", join(directory, "files/in.txt"));
+		const result = await run([
+			"--input-file=out.txt",
+			"--output-file=in.txt",
+		]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				code: "LeavesFiles",
+				message:
+					'"out.txt" is a link, which could lead outside the files directory',
+				path: ["inputFile"],
+			},
+			{
+				code: "LeavesFiles",
+				message:
+					'"in.txt" is a link, which could lead outside the files directory',
+				path: ["outputFile"],
+			},
+		]);
+		expect(await Bun.file(outside).text()).toBe("Outside\n");
+	});
+
+	test("keeps the old output when the write fails", async () => {
+		const result = await customCat(
+			["--input-file=hello.txt", "--output-file=copy.txt"],
+			{ "hello.txt": "Hello\n", "copy.txt": "Old\n" },
+		);
+		expect(result.exitCode).toBe(0);
+		await Bun.write(file("copy.txt"), "Old\n");
+		chmodSync(join(directory, "files"), 0o555);
+		const failed = await run([
+			"--input-file=hello.txt",
+			"--output-file=copy.txt",
+		]);
+		expect(failed).toEqual({
+			stdout: "",
+			stderr: "custom_cat: cannot write files/copy.txt: Permission denied\n",
+			exitCode: 3,
+		});
+		expect(await file("copy.txt").text()).toBe("Old\n");
+	});
+
+	test("leaves no temporary file behind when the rename fails", async () => {
+		await customCat(["--input-file=hello.txt"]);
+		mkdirSync(join(directory, "files/out.txt/inside"), { recursive: true });
+		const failed = await run([
+			"--input-file=hello.txt",
+			"--output-file=out.txt",
+		]);
+		expect(failed.exitCode).toBe(3);
+		expect(failed.stderr).toStartWith(
+			"custom_cat: cannot write files/out.txt",
+		);
+		expect(readdirSync(join(directory, "files")).sort()).toEqual([
+			"hello.txt",
+			"out.txt",
+		]);
+		expect(readdirSync(join(directory, "files/out.txt"))).toEqual([
+			"inside",
+		]);
+	});
+
+	test("keeps an overwritten output's mode", async () => {
+		await customCat(["--input-file=hello.txt"], {
+			"hello.txt": "Hello\n",
+			"copy.txt": "Old\n",
+		});
+		chmodSync(join(directory, "files/copy.txt"), 0o640);
+		const result = await run([
+			"--input-file=hello.txt",
+			"--output-file=copy.txt",
 		]);
 		expect(result.exitCode).toBe(0);
-		expect(await file("copy.txt").text()).toBe("Hello\n");
-		expect(await Bun.file(join(directory, "copy.txt")).exists()).toBe(
-			false,
-		);
+		expect((await file("copy.txt").stat()).mode & 0o777).toBe(0o640);
 	});
 });

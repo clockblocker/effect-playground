@@ -14,8 +14,12 @@ export const IssueCode = Schema.Literals([
 	"Missing",
 	"TooShort",
 	"TooLong",
+	"NotPlainName",
 	"NotTxtFile",
+	"LeavesFiles",
 	"FileNotFound",
+	"SameAsInput",
+	"SameFileAsInput",
 ]);
 export type IssueCode = typeof IssueCode.Type;
 
@@ -26,10 +30,16 @@ export const IssueMessage = {
 		`Must be at least ${limit} characters long`,
 	TooLong: ({ limit }: { readonly limit: number }) =>
 		`Must be at most ${limit} characters long`,
+	NotPlainName: () => "Must be a file name, not a path",
 	NotTxtFile: ({ value }: { readonly value: string }) =>
 		`"${value}" is not a .txt file`,
+	LeavesFiles: ({ value }: { readonly value: string }) =>
+		`"${value}" is a link, which could lead outside the files directory`,
 	FileNotFound: ({ value }: { readonly value: string }) =>
 		`"${value}" does not exist`,
+	SameAsInput: () => "Must not be the input file",
+	SameFileAsInput: ({ value }: { readonly value: string }) =>
+		`"${value}" is the input file under another name`,
 } as const;
 
 type Segments = ReadonlyArray<string | number>;
@@ -52,16 +62,16 @@ export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
 export namespace ReadFile {
 	/** What ReadFile takes. */
 	export const Request = Schema.Struct({
-		/**
-		 * The file to read, such as "hello.txt". Only its base name is used, so a
-		 * request never leaves the files directory.
-		 */
+		/** The file to read, such as "hello.txt", in the files directory. */
 		name: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
+			}),
+			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
+				message: IssueMessage.NotPlainName(),
 			}),
 		),
 	});
@@ -111,10 +121,7 @@ export namespace ReadFile {
 export namespace CustomCat {
 	/** What CustomCat takes. */
 	export const Request = Schema.Struct({
-		/**
-		 * The file to copy, such as "hello.txt". Only its base name is used, so a
-		 * request never leaves the files directory.
-		 */
+		/** The file to copy, such as "hello.txt", in the files directory. */
 		inputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
@@ -122,10 +129,13 @@ export namespace CustomCat {
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
 			}),
+			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
+				message: IssueMessage.NotPlainName(),
+			}),
 		),
 		/**
-		 * The file to write the copy to, replacing it if it exists. Only its base
-		 * name is used, as for the input.
+		 * The file to write the copy to, in the files directory, replacing it if
+		 * it exists.
 		 */
 		outputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
@@ -133,6 +143,9 @@ export namespace CustomCat {
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
+			}),
+			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
+				message: IssueMessage.NotPlainName(),
 			}),
 		),
 	});

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <rfl.hpp>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "checked.hpp"
@@ -82,8 +85,56 @@ bool check(std::type_identity<Checked<Base, Rules...>>,
 	return passed;
 }
 
+// A struct's rules across its fields: `using Rules = std::tuple<…>`. A rule
+// has a `code`, a `message`, `static bool passes(const Struct&)`, and in
+// `field` a pointer to the member its issue goes on, whose value fills
+// `{value}`.
+template <class T>
+concept HasRules = requires { typename T::Rules; };
+
+template <class T>
+const auto& raw_value(const T& field) {
+	if constexpr (rfl::internal::is_description_v<T>) {
+		return raw_value(field.get());
+	} else {
+		return field.value();
+	}
+}
+
+// The wire name of the member `member` points into `value`.
+template <class T>
+std::string wire_name(const T& value, const void* member) {
+	std::string name;
+	protocol::Wire::process<T>(rfl::to_view(value)).apply(
+		[&](const auto& field) {
+			if (static_cast<const void*>(field.value()) == member) {
+				name = std::string(field.name());
+			}
+		});
+	return name;
+}
+
+// Runs a struct's rules in order and stops at the first that fails, as a
+// Checked's base stops its refinements: a rule may assume the ones before it
+// passed.
+template <class T, class... Rules>
+void check_rules(std::type_identity<std::tuple<Rules...>>, const T& value,
+				 std::vector<PathSegment>& path, std::vector<Issue>& issues) {
+	(
+		[&] {
+			if (Rules::passes(value)) return true;
+			const auto& member = value.*Rules::field;
+			path.emplace_back(wire_name(value, &member));
+			issues.push_back(issue<Rules>(raw_value(member), path));
+			path.pop_back();
+			return false;
+		}() &&
+		...);
+}
+
 // Walks a value of the request's own type: structs field by field, under
-// their wire names, arrays element by element, under their indexes.
+// their wire names, arrays element by element, under their indexes. A
+// struct's own rules run once its fields pass theirs.
 template <class T>
 void walk(const T& value, std::vector<PathSegment>& path,
 		  std::vector<Issue>& issues) {
@@ -102,12 +153,19 @@ void walk(const T& value, std::vector<PathSegment>& path,
 			path.pop_back();
 		}
 	} else if constexpr (std::is_class_v<T> && std::is_aggregate_v<T>) {
+		const auto before = issues.size();
 		protocol::Wire::process<T>(rfl::to_view(value)).apply(
 			[&](const auto& field) {
 				path.emplace_back(std::string(field.name()));
 				walk(*field.value(), path, issues);
 				path.pop_back();
 			});
+		if constexpr (HasRules<T>) {
+			if (issues.size() == before) {
+				check_rules(std::type_identity<typename T::Rules>(), value, path,
+							issues);
+			}
+		}
 	}
 }
 
@@ -132,6 +190,12 @@ void for_each_checked_rule(std::type_identity<Checked<Base, Rules...>>,
 	(visit.template operator()<Rules>(), ...);
 }
 
+template <class... Rules, class Visit>
+void for_each_struct_rule(std::type_identity<std::tuple<Rules...>>,
+						  const Visit& visit) {
+	(visit.template operator()<Rules>(), ...);
+}
+
 template <class T, class Visit>
 void for_each_rule(const Visit& visit) {
 	if constexpr (rfl::internal::is_description_v<T>) {
@@ -148,6 +212,9 @@ void for_each_rule(const Visit& visit) {
 				 typename rfl::tuple_element_t<index, Fields>::Type>>(visit),
 			 ...);
 		}(std::make_index_sequence<rfl::tuple_size_v<Fields>>());
+		if constexpr (HasRules<T>) {
+			for_each_struct_rule(std::type_identity<typename T::Rules>(), visit);
+		}
 	}
 }
 

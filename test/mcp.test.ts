@@ -11,6 +11,9 @@ import { McpRoutes } from "../src/server/mcp.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "mcp-"));
 
+// What the C++ PlainName rule's rfl::PatternValidator carries.
+const plainName = String.raw`^(?!\.\.?$)[^/\\]*$`;
+
 const { handler, dispose } = HttpRouter.toWebHandler(
 	McpRoutes.pipe(
 		Layer.provide(CustomCatCli.layerIn(directory)),
@@ -100,11 +103,13 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 							type: "string",
 							minLength: 5,
 							maxLength: 25,
+							pattern: plainName,
 						},
 						outputFile: {
 							type: "string",
 							minLength: 5,
 							maxLength: 25,
+							pattern: plainName,
 						},
 					},
 					required: ["inputFile", "outputFile"],

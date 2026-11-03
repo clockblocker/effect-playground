@@ -12,6 +12,8 @@
 //   checked.hpp). Each failing rule becomes an Issue, with the rule's code and
 //   its message, in which `{value}` stands for the field's value and
 //   `{limit}` for the rule's limit. A missing field is a `Missing` issue.
+// - A rule across fields lives on the request, in its `Rules` (see
+//   validate.hpp), and names the field its issue goes on.
 
 #include <cstddef>
 #include <cstdint>
@@ -34,12 +36,26 @@ namespace protocol {
 using Wire = rfl::SnakeCaseToCamelCase;
 
 // Every way a field of a request can be wrong, each produced by one rule:
-//   Missing       the field is absent                     Present
-//   TooShort      fewer characters than the minimum       MinLength
-//   TooLong       more characters than the maximum        MaxLength
-//   NotTxtFile    the name doesn't end in .txt            TxtFile
-//   FileNotFound  no such file in files/                  ExistingFile
-enum class IssueCode { Missing, TooShort, TooLong, NotTxtFile, FileNotFound };
+//   Missing          the field is absent                      Present
+//   TooShort         fewer characters than the minimum        MinLength
+//   TooLong          more characters than the maximum         MaxLength
+//   NotPlainName     a path, or . or .., not a file name      PlainName
+//   NotTxtFile       the name doesn't end in .txt             TxtFile
+//   LeavesFiles      a link, which could lead out of files/   NotALink
+//   FileNotFound     no such file in files/                   ExistingFile
+//   SameAsInput      the output names the input               DifferentNames
+//   SameFileAsInput  the output is the input, linked          DifferentFiles
+enum class IssueCode {
+	Missing,
+	TooShort,
+	TooLong,
+	NotPlainName,
+	NotTxtFile,
+	LeavesFiles,
+	FileNotFound,
+	SameAsInput,
+	SameFileAsInput
+};
 
 // A field name, as on the wire, or an index into an array.
 using PathSegment = std::variant<std::string, int>;
@@ -97,6 +113,16 @@ struct MaxLength {
 	}
 };
 
+// The name of a file in files/, which never names anything outside it.
+struct PlainName {
+	static constexpr IssueCode code = IssueCode::NotPlainName;
+	static constexpr std::string_view message = "Must be a file name, not a path";
+	using Schema = rfl::PatternValidator<R"(^(?!\.\.?$)[^/\\]*$)", "PlainName">;
+	static bool passes(const std::string& value) {
+		return static_cast<bool>(Schema::validate(value));
+	}
+};
+
 struct TxtFile {
 	static constexpr IssueCode code = IssueCode::NotTxtFile;
 	static constexpr std::string_view message = "\"{value}\" is not a .txt file";
@@ -108,10 +134,28 @@ struct TxtFile {
 // The directory every file name refers to, under the working directory.
 inline const std::filesystem::path files = "files";
 
-// Only the base name counts, so a name never leaves files/.
+// Only for a name PlainName accepts.
 inline std::filesystem::path in_files(const std::string& name) {
-	return files / std::filesystem::path(name).filename();
+	return files / name;
 }
+
+// Any link is refused, even one that stays in files/: following none is
+// simpler than checking where each leads.
+struct NotALink {
+	static constexpr IssueCode code = IssueCode::LeavesFiles;
+	static constexpr std::string_view message =
+		"\"{value}\" is a link, which could lead outside the files directory";
+	static bool passes(const std::string& value) {
+		namespace fs = std::filesystem;
+		std::error_code error;
+		const auto path = in_files(value);
+		if (fs::is_symlink(fs::symlink_status(path, error))) return false;
+		const auto resolved = fs::weakly_canonical(path, error);
+		if (error) return true;
+		const auto directory = fs::weakly_canonical(files, error);
+		return error || resolved.parent_path() == directory;
+	}
+};
 
 // Anything there passes, even a directory: that isn't about the name.
 struct ExistingFile {
@@ -125,16 +169,16 @@ struct ExistingFile {
 };
 
 // Each refinement only checks a name its base accepts: "x.md" is too short,
-// and no more.
+// and no more. The rules come first, then what the files say.
 using Name = Checked<std::string, MinLength<5>, MaxLength<25>>;
-using FileName = Checked<Name, TxtFile>;
-using Existing = Checked<FileName, ExistingFile>;
+using FileName = Checked<Name, PlainName, TxtFile>;
+using InFiles = Checked<FileName, NotALink>;
+using Existing = Checked<InFiles, ExistingFile>;
 
 struct ReadFileRequest {
-	rfl::Description<
-		"The file to read, such as \"hello.txt\". Only its base name is used, so "
-		"a request never leaves the files directory.",
-		Existing>
+	rfl::Description<"The file to read, such as \"hello.txt\", in the files "
+					 "directory.",
+					 Existing>
 		name;
 };
 
@@ -151,17 +195,44 @@ struct ReadFile {
 	Error error;
 };
 
+struct DifferentNames;
+struct DifferentFiles;
+
 struct CustomCatRequest {
-	rfl::Description<
-		"The file to copy, such as \"hello.txt\". Only its base name is used, so "
-		"a request never leaves the files directory.",
-		Existing>
+	rfl::Description<"The file to copy, such as \"hello.txt\", in the files "
+					 "directory.",
+					 Existing>
 		input_file;
 	rfl::Description<
-		"The file to write the copy to, replacing it if it exists. Only its "
-		"base name is used, as for the input.",
-		FileName>
+		"The file to write the copy to, in the files directory, replacing it "
+		"if it exists.",
+		InFiles>
 		output_file;
+
+	using Rules = std::tuple<DifferentNames, DifferentFiles>;
+};
+
+struct DifferentNames {
+	static constexpr IssueCode code = IssueCode::SameAsInput;
+	static constexpr std::string_view message = "Must not be the input file";
+	static constexpr auto field = &CustomCatRequest::output_file;
+	static bool passes(const CustomCatRequest& request) {
+		return request.input_file().value() != request.output_file().value();
+	}
+};
+
+// A hard link: NotALink already refuses symbolic ones.
+struct DifferentFiles {
+	static constexpr IssueCode code = IssueCode::SameFileAsInput;
+	static constexpr std::string_view message =
+		"\"{value}\" is the input file under another name";
+	static constexpr auto field = &CustomCatRequest::output_file;
+	static bool passes(const CustomCatRequest& request) {
+		std::error_code error;
+		return !std::filesystem::equivalent(
+			in_files(request.input_file().value()),
+			in_files(request.output_file().value()), error);
+	}
 };
 
 struct CustomCatSuccess {

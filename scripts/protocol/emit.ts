@@ -443,13 +443,17 @@ function fieldCode(
 	definitions: ReadonlyMap<string, Definition>,
 	issues: readonly IssueTemplate[],
 ): string {
-	const imported = SchemaRepresentation.fromJsonSchemaDocument({
-		dialect: "draft-2020-12",
-		schema,
-		definitions: Object.fromEntries(
-			[...definitions].map(([name, { schema }]) => [name, schema]),
-		),
-	});
+	const imported = SchemaRepresentation.fromJsonSchemaDocument(
+		{
+			dialect: "draft-2020-12",
+			schema,
+			definitions: Object.fromEntries(
+				[...definitions].map(([name, { schema }]) => [name, schema]),
+			),
+		},
+		// The schema is our own, from the C++ rules.
+		{ patterns: "apply" },
+	);
 	const code = SchemaRepresentation.toCodeDocument(
 		SchemaRepresentation.toMultiDocument(
 			SchemaRepresentation.toRepresentation(imported.ast),
@@ -468,15 +472,30 @@ function fieldCode(
 			)
 			.replaceAll(lengthBound, (_, bound = "", limit = "") => {
 				const keyword = bound === "Min" ? "minLength" : "maxLength";
-				const issue = issues.find((issue) => issue.keyword === keyword);
-				if (issue === undefined) {
-					throw new Error(
-						`A field has a ${keyword}, but no issue code's rule carries one`,
-					);
-				}
-				return `Schema.is${bound}CodePoints(${limit}, { message: IssueMessage.${issue.code}({ limit: ${limit} }) })`;
-			}),
+				return `Schema.is${bound}CodePoints(${limit}, ${checkAnnotations(issues, keyword, limit)})`;
+			})
+			.replaceAll(
+				patternCheck,
+				(_, pattern = "") =>
+					`Schema.isPattern(new RegExp(${pattern}, "u"), ${checkAnnotations(issues, "pattern")})`,
+			),
 	);
+}
+
+/** The message of the issue code whose rule carries `keyword`, filled in. */
+function checkAnnotations(
+	issues: readonly IssueTemplate[],
+	keyword: string,
+	limit?: string,
+): string {
+	const issue = issues.find((issue) => issue.keyword === keyword);
+	if (issue === undefined) {
+		throw new Error(
+			`A field has a ${keyword}, but no issue code's rule carries one`,
+		);
+	}
+	const named = issue.message.includes("{limit}");
+	return `{ message: IssueMessage.${issue.code}(${named ? `{ limit: ${limit} }` : ""}) }`;
 }
 
 // A string's minLength and maxLength (from a rule's rfl::Size) arrive as code
@@ -485,6 +504,10 @@ function fieldCode(
 // code whose rule carries the keyword, as the C++ side words it.
 const lengthBound =
 	/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g;
+
+// The same for a pattern, from a rule's rfl::PatternValidator.
+const patternCheck =
+	/Schema\.isPattern\(new globalThis\.RegExp\(("(?:[^"\\]|\\.)*"), "u"\)\)\.annotate\(\{ "expected": "(?:[^"\\]|\\.)*" \}\)/g;
 
 /**
  * The engine chains one `.check(…)` per check; a hand-written schema passes

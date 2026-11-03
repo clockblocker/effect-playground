@@ -38,7 +38,7 @@
             "type": "object",
             "properties": {
                 "inputFile": {
-                    "description": "The file to copy, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory.",
+                    "description": "The file to copy, such as \"hello.txt\", in the files directory.",
                     "allOf": [
                         {
                             "type": "string",
@@ -47,11 +47,15 @@
                         {
                             "type": "string",
                             "maxLength": 25
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
                         }
                     ]
                 },
                 "outputFile": {
-                    "description": "The file to write the copy to, replacing it if it exists. Only its base name is used, as for the input.",
+                    "description": "The file to write the copy to, in the files directory, replacing it if it exists.",
                     "allOf": [
                         {
                             "type": "string",
@@ -60,6 +64,10 @@
                         {
                             "type": "string",
                             "maxLength": 25
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
                         }
                     ]
                 }
@@ -114,8 +122,12 @@
                         "Missing",
                         "TooShort",
                         "TooLong",
+                        "NotPlainName",
                         "NotTxtFile",
-                        "FileNotFound"
+                        "LeavesFiles",
+                        "FileNotFound",
+                        "SameAsInput",
+                        "SameFileAsInput"
                     ]
                 },
                 "message": {
@@ -170,7 +182,7 @@
             "type": "object",
             "properties": {
                 "name": {
-                    "description": "The file to read, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory.",
+                    "description": "The file to read, such as \"hello.txt\", in the files directory.",
                     "allOf": [
                         {
                             "type": "string",
@@ -179,6 +191,10 @@
                         {
                             "type": "string",
                             "maxLength": 25
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
                         }
                     ]
                 }
@@ -212,11 +228,24 @@
             "message": "Must be at most {limit} characters long",
             "keyword": "maxLength"
         },
+        "NotPlainName": {
+            "message": "Must be a file name, not a path",
+            "keyword": "pattern"
+        },
         "NotTxtFile": {
             "message": "\"{value}\" is not a .txt file"
         },
+        "LeavesFiles": {
+            "message": "\"{value}\" is a link, which could lead outside the files directory"
+        },
         "FileNotFound": {
             "message": "\"{value}\" does not exist"
+        },
+        "SameAsInput": {
+            "message": "Must not be the input file"
+        },
+        "SameFileAsInput": {
+            "message": "\"{value}\" is the input file under another name"
         }
     }
 }

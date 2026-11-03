@@ -180,7 +180,8 @@ function procedure(
 
 /**
  * The schema's "x-issues": each code's template, whose every `{name}` is
- * `{value}`, or `{limit}` for a code with a keyword.
+ * `{value}`, or `{limit}` for a code with a keyword, which no other code
+ * carries.
  */
 function issueTemplates(raw: unknown): IssueTemplate[] {
 	if (!Predicate.isObject(raw) || Object.keys(raw).length === 0) {
@@ -188,6 +189,7 @@ function issueTemplates(raw: unknown): IssueTemplate[] {
 			`Expected the issue codes' templates in "${issuesKeyword}"`,
 		);
 	}
+	const carriers = new Map<string, string>();
 	return Object.entries(raw).map(([code, entry]) => {
 		const message = Predicate.isObject(entry) ? entry.message : undefined;
 		const keyword = Predicate.isObject(entry) ? entry.keyword : undefined;
@@ -197,7 +199,15 @@ function issueTemplates(raw: unknown): IssueTemplate[] {
 		if (keyword !== undefined && typeof keyword !== "string") {
 			throw new Error(`${code}'s keyword must be a string`);
 		}
-		const names = keyword === undefined ? ["value"] : ["value", "limit"];
+		if (keyword !== undefined) {
+			const other = carriers.get(keyword);
+			if (other !== undefined) {
+				throw new Error(`${other} and ${code} both carry ${keyword}`);
+			}
+			carriers.set(keyword, code);
+		}
+		// A schema check's message is the same for every value.
+		const names = keyword === undefined ? ["value"] : ["limit"];
 		for (const [, name = ""] of message.matchAll(placeholder)) {
 			if (!names.includes(name)) {
 				throw new Error(
