@@ -533,7 +533,10 @@ function fieldCode(
 	);
 }
 
-/** The message of the issue code whose rule carries `keyword`, filled in. */
+/**
+ * The message of the issue code whose rule carries `keyword`, filled in, and
+ * the code itself, which the REST API reads back to report the issue.
+ */
 function checkAnnotations(
 	issues: readonly IssueTemplate[],
 	keyword: string,
@@ -546,8 +549,11 @@ function checkAnnotations(
 		);
 	}
 	const named = issue.message.includes("{limit}");
-	return `{ message: IssueMessage.${issue.code}(${named ? `{ limit: ${limit} }` : ""}) }`;
+	return `{ message: IssueMessage.${issue.code}(${named ? `{ limit: ${limit} }` : ""}), ${issueCodeAnnotation}: ${JSON.stringify(issue.code)} }`;
 }
+
+/** The annotation on a schema check that names its issue code. */
+const issueCodeAnnotation = "issueCode";
 
 // A string's minLength and maxLength (from a rule's rfl::Size) arrive as code
 // point checks, annotated with the very `expected` text each check has by

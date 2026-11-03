@@ -3,6 +3,7 @@ import {
 	HttpApi,
 	HttpApiEndpoint,
 	HttpApiGroup,
+	HttpApiMiddleware,
 	HttpApiSchema,
 } from "effect/http-api";
 import { CliFailed } from "./cli-failed.ts";
@@ -23,34 +24,57 @@ const withStatus =
 	> =>
 		self.pipe(HttpApiSchema.status(code));
 
-// The generated field, so a name the protocol rejects (too short, too long)
-// never reaches a handler: HttpApi answers 400 itself.
+// The generated field, so a name the protocol rejects (too short, too long,
+// a path) never reaches a handler.
 const params = { name: ReadFile.Request.fields.name };
+
+const readFileInvalid = ReadFile.InvalidRequest.pipe(withStatus(422));
+const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));
 
 // The BFF's own disk failed: its fault, not the client's.
 const ioFailed = IoFailed.pipe(withStatus(500));
 
-export class BffApi extends HttpApi.make("bff").add(
-	HttpApiGroup.make("files")
-		.add(
-			HttpApiEndpoint.get("read", "/files/read/:name", {
-				params,
-				success: Schema.String.pipe(HttpApiSchema.asText()),
-				error: [
-					ReadFile.InvalidRequest.pipe(withStatus(422)),
-					ioFailed,
-				],
-			}),
-			HttpApiEndpoint.post("copy", "/files/copy", {
-				payload: CustomCat.Request,
-				success: CustomCat.Success,
-				error: [
-					CustomCat.InvalidRequest.pipe(withStatus(422)),
-					ioFailed,
-					// custom_cat is a service the BFF depends on, like a backend.
-					CliFailed.pipe(withStatus(503)),
-				],
-			}),
-		)
-		.prefix("/api"),
+/**
+ * Turns a request the schema rejects for a rule, such as a name too short,
+ * into the method's InvalidRequest, as the handler or custom_cat would have.
+ * A request of the wrong shape stays HttpApi's empty 400.
+ */
+export class ReadFileRules extends HttpApiMiddleware.Service<ReadFileRules>()(
+	"effect-playground/ReadFileRules",
+	{ error: readFileInvalid },
 ) {}
+
+/** As ReadFileRules, for a copy. */
+export class CustomCatRules extends HttpApiMiddleware.Service<CustomCatRules>()(
+	"effect-playground/CustomCatRules",
+	{ error: customCatInvalid },
+) {}
+
+export class BffApi extends HttpApi.make("bff")
+	.add(
+		HttpApiGroup.make("files")
+			.add(
+				HttpApiEndpoint.get("read", "/files/read/:name", {
+					params,
+					success: Schema.String.pipe(HttpApiSchema.asText()),
+					error: [readFileInvalid, ioFailed],
+				}).middleware(ReadFileRules),
+				HttpApiEndpoint.post("copy", "/files/copy", {
+					payload: CustomCat.Request,
+					success: CustomCat.Success,
+					error: [
+						customCatInvalid,
+						ioFailed,
+						// custom_cat is a service the BFF depends on, like a backend.
+						CliFailed.pipe(withStatus(503)),
+					],
+				}).middleware(CustomCatRules),
+			)
+			.prefix("/api"),
+	)
+	// Every issue, as custom_cat reports them, and an unknown field is wrong,
+	// as custom_cat's unknown flag is.
+	.annotate(HttpApi.ParseOptions, {
+		errors: "all",
+		onExcessProperty: "error",
+	}) {}

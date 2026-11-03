@@ -83,12 +83,15 @@ export namespace ReadFile {
 		name: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
+				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
+				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
+				issueCode: "NotPlainName",
 			}),
 		),
 	});
@@ -142,12 +145,15 @@ export namespace CustomCat {
 		inputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
+				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
+				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
+				issueCode: "NotPlainName",
 			}),
 		),
 		/**
@@ -157,12 +163,15 @@ export namespace CustomCat {
 		outputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
+				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
+				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
+				issueCode: "NotPlainName",
 			}),
 		),
 	});

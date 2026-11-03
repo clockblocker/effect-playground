@@ -392,7 +392,7 @@ describe("emitter", () => {
 
 	test("gives a length bound the message of the code that carries it", async () => {
 		expect(emitted(fixture())).toContain(
-			"Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }) })",
+			'Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }), issueCode: "TooShort" })',
 		);
 		const { Get } = await load(fixture());
 		expect(() =>
@@ -402,7 +402,7 @@ describe("emitter", () => {
 
 	test("gives a pattern the message of the code that carries it", async () => {
 		expect(emitted(fixture())).toContain(
-			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase() })',
+			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase(), issueCode: "Lowercase" })',
 		);
 		const { Get } = await load(fixture());
 		expect(() =>

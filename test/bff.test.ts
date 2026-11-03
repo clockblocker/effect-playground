@@ -204,16 +204,52 @@ describe("REST", () => {
 		).toBe(422);
 	});
 
-	test("rejects a request whose shape is wrong before the handler, with 400", async () => {
-		expect((await copy({ inputFile: "hello.txt" })).status).toBe(400);
-		expect((await copy({ inputFile: 1, outputFile: "x.txt" })).status).toBe(
-			400,
-		);
+	test("answers a rule the schema checks with 422 and its issues, too", async () => {
+		const short = await get("x.md");
+		expect(short.status).toBe(422);
+		expect(JSON.parse(short.body)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [
+				{
+					code: "TooShort",
+					message: "Must be at least 5 characters long",
+					path: ["name"],
+				},
+			],
+		});
+		const both = await copy({ inputFile: "hi", outputFile: "../x.txt" });
+		expect(both.status).toBe(422);
+		expect(JSON.parse(both.body).issues).toEqual([
+			{
+				code: "TooShort",
+				message: "Must be at least 5 characters long",
+				path: ["inputFile"],
+			},
+			{
+				code: "NotPlainName",
+				message: "Must be a file name, not a path",
+				path: ["outputFile"],
+			},
+		]);
+		const missing = await copy({ inputFile: "hello.txt" });
+		expect(missing.status).toBe(422);
+		expect(JSON.parse(missing.body).issues).toEqual([
+			{ code: "Missing", message: "Required", path: ["outputFile"] },
+		]);
 	});
 
-	test("still rejects a name out of bounds before the handler, with 400", async () => {
-		expect((await get("x.md")).status).toBe(400);
-		expect((await get("..%2Fhello.txt")).status).toBe(400);
+	test("rejects a request of the wrong shape before the handler, with 400", async () => {
+		const wrongType = await copy({ inputFile: 1, outputFile: "x.txt" });
+		expect(wrongType).toEqual({ status: 400, body: "" });
+		const unknownField = await copy({
+			inputFile: "hello.txt",
+			outputFile: "x.txt",
+			verbose: true,
+		});
+		expect(unknownField.status).toBe(400);
+		expect(await Bun.file(join(scratch, "files/x.txt")).exists()).toBe(
+			false,
+		);
 	});
 
 	test("answers IoFailed with 500 and its JSON", async () => {
