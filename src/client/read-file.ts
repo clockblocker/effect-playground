@@ -1,23 +1,16 @@
 import { Effect, Match } from "effect";
 import type { ReadFile } from "../shared/generated/backend-protocol.ts";
 import type { Reader } from "../shared/reader.ts";
-import { BffClient, BffRpcClient } from "./clients.ts";
+import { BffRpcClient } from "./clients.ts";
 
-// One call per transport and reader. Each succeeds with the file's contents
-// and fails with exactly what it can fail with, so only the backend calls
-// list BackendUnavailable: hover one to see it.
+// One call per reader. Each succeeds with the file's contents and fails with
+// exactly what it can fail with, so only the backend call lists
+// BackendUnavailable: hover one to see it.
 
-export const rest = {
-	bff: (name: string) =>
-		BffClient.use((client) => client.bff.read({ params: { name } })),
-	backend: (name: string) =>
-		BffClient.use((client) => client.backend.read({ params: { name } })),
-};
-
-// RPC answers with the success struct; its contents make it look like REST.
+// RPC answers with the success struct; the page shows its contents.
 const contents = (success: ReadFile.Success) => success.contents;
 
-export const rpc = {
+export const readers = {
 	bff: (name: string) =>
 		BffRpcClient.use((client) =>
 			Effect.map(client.ReadFileBff({ name }), contents),
@@ -28,21 +21,14 @@ export const rpc = {
 		),
 };
 
-/** Whatever any of the calls can fail with. */
-export type ReadFailure = Effect.Error<
-	ReturnType<(typeof rest | typeof rpc)[Reader]>
->;
+/** Whatever either call can fail with. */
+export type ReadFailure = Effect.Error<ReturnType<(typeof readers)[Reader]>>;
 
 /**
  * What the page says when a call fails. The domain errors say it themselves;
- * the transport errors are the client's own, so their wording lives here.
+ * the transport error is the client's own, so its wording lives here.
  */
 export const describeFailure = Match.type<ReadFailure>().pipe(
-	Match.tag(
-		"HttpClientError",
-		"SchemaError",
-		"RpcClientError",
-		(error) => `Request failed: ${error.message}`,
-	),
+	Match.tag("RpcClientError", (error) => `Request failed: ${error.message}`),
 	Match.orElse((error) => error.message),
 );

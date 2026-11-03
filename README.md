@@ -1,17 +1,17 @@
 # Effect playground
 
 A sandbox for learning Effect. Type a file name, pick a reader, submit, and
-the file's contents come back, once over REST (`effect/http-api`) and once
-over Effect RPC (`effect/rpc`). Files live in `files/`. A name that isn't
-`.txt` fails with `NotTxtFile`; a missing `.txt` fails with `FileNotFound`.
+the file's contents come back over Effect RPC (`effect/rpc`). Files live in
+`files/`. A name that isn't `.txt` fails with `NotTxtFile`; a missing `.txt`
+fails with `FileNotFound`.
 A name must be 5 to 25 characters long. That rule lives on the C++ struct,
 and everything else gets it from the generated schema (see below).
 
 Two processes take part. The **backend** is a C++ process; it serves
 JSON-RPC over TCP and launches the BFF. The **BFF** (backend-for-frontend)
-is a Bun server; it serves the page REST and RPC, and calls the backend over
-JSON-RPC. Each has its own reader, and the page's switch picks one: BFF or
-Backend.
+is a Bun server; it serves the page over RPC, also serves a REST API
+(`effect/http-api`) for other clients, and calls the backend over JSON-RPC.
+Each has its own reader, and the page's switch picks one: BFF or Backend.
 
 ## Prerequisites
 
@@ -31,9 +31,9 @@ Open <http://127.0.0.1:5200/>. `bun run dev` builds `cpp/` if needed, then
 runs the backend next to Vite. The backend listens on an ephemeral port on
 127.0.0.1 (`EFFECT_PLAYGROUND_BACKEND_PORT` pins it), launches the BFF as
 `bun --watch src/server/main.ts` with that port in the same variable, and
-forwards Ctrl-C to it. The BFF listens on 5201 and Vite proxies `/api` and
-`/rpc` to it. `EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT`
-move those.
+forwards Ctrl-C to it. The BFF listens on 5201 and Vite proxies `/rpc` to
+it; the REST API is at `http://127.0.0.1:5201/api/…`.
+`EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT` move those.
 
 If the backend dies some other way, even by SIGKILL or a crash, a watchdog
 process it forks at startup stops the BFF within a second, `--watch`
@@ -50,12 +50,12 @@ procedure fail with `BackendUnavailable`, as they do when the backend dies.
 Each reader has its own endpoint and procedure, so only the backend ones
 declare `BackendUnavailable`:
 
-- REST: `GET /api/bff/files/read/:name` and
-  `GET /api/backend/files/read/:name`, called as
-  `client.bff.read({ params: { name } })` and
-  `client.backend.read({ params: { name } })` on the client HttpApi derives.
-- RPC: `ReadFileBff({ name })` and `ReadFileBackend({ name })`, both over
-  `POST /rpc`.
+- RPC, which the page uses: `ReadFileBff({ name })` and
+  `ReadFileBackend({ name })`, both over `POST /rpc`.
+- REST, for other clients: `GET /api/bff/files/read/:name` and
+  `GET /api/backend/files/read/:name`. A client HttpApi derives from `BffApi`
+  calls them as `client.bff.read({ params: { name } })` and
+  `client.backend.read(…)`.
 
 ## The backend protocol
 
@@ -102,11 +102,11 @@ to carry one. A name out of bounds isn't a domain error, so there's no tagged
 error for it. Each boundary rejects it:
 
 - REST: `:name` is `ReadFile.Request.fields.name`, so HttpApi answers 400, and
-  the REST client fails with a `SchemaError` before sending anything.
+  a client HttpApi derives fails with a `SchemaError` before sending anything.
 - RPC: the client can't encode the payload and dies before sending. A raw
   request gets an `Exit` whose cause is a `Die` with the schema's message.
 - The backend: reflect-cpp can't parse the params, and it answers with a `Die`.
-- The page: each panel's react-hook-form validates against the same field, so
+- The page: its react-hook-form validates against the same field, so
   it shows the message under the input and never sends the request.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
@@ -137,16 +137,16 @@ The backend's integration tests skip when `cmake` isn't on the PATH.
 - `src/server/` is the BFF: `BffReader` and `BackendReader`, and the two
   transports mounted on one router; each handler calls the reader its
   endpoint names.
-- `src/client/` builds both clients, `BffClient` and `BffRpcClient`, with one
-  call per transport and reader (`rest.bff`, `rpc.backend`, …). Each returns
-  the contents, failing with exactly that call's errors. A panel runs one
-  through `Effect.result` and renders the `Result`; on failure it shows
+- `src/client/` builds the RPC client, `BffRpcClient`, with one call per
+  reader (`readers.bff`, `readers.backend`). Each returns the contents,
+  failing with exactly that call's errors. The form runs one through
+  `Effect.result` and renders the `Result`; on failure it shows
   `describeFailure`, which is the error's own `message` for the domain errors
-  and the client's wording for transport errors. `App` builds the form schema
-  from the generated `ReadFile.Request` plus `Reader`, and passes it to each
-  panel, whose react-hook-form resolver uses it.
+  and the client's wording for the transport error. `App` builds the form
+  schema from the generated `ReadFile.Request` plus `Reader`, and passes it to
+  the panel, whose react-hook-form resolver uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
-  `bun run check` runs.
+  `bun run check` runs, for the page's RPC calls and the REST API's client.
 - `scripts/` builds the backend and runs the code generator.
 
 `@effect/platform-node-shared` is pinned to 4.0.0 only to match

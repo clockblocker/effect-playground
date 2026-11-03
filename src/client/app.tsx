@@ -4,11 +4,11 @@ import { useId, useMemo, useState } from "react";
 import { type UseFormRegisterReturn, useForm } from "react-hook-form";
 import { ReadFile } from "../shared/generated/backend-protocol.ts";
 import { Reader } from "../shared/reader.ts";
-import type { BffClient, BffRpcClient } from "./clients.ts";
+import type { BffRpcClient } from "./clients.ts";
 import { runtime } from "./clients.ts";
-import { describeFailure, type ReadFailure, rest, rpc } from "./read-file.ts";
+import { describeFailure, type ReadFailure, readers } from "./read-file.ts";
 
-// What a panel's form holds: the generated request, so the 5–25 rule and its
+// What the form holds: the generated request, so the 5–25 rule and its
 // messages come from the C++ struct, plus which reader to send it to.
 const ReadFileForm = Schema.Struct({
 	...ReadFile.Request.fields,
@@ -19,26 +19,21 @@ type ReadFileForm = typeof ReadFileForm;
 export function App() {
 	return (
 		<main className="panels">
-			<ReaderPanel title="REST" schema={ReadFileForm} readers={rest} />
-			<ReaderPanel title="RPC" schema={ReadFileForm} readers={rpc} />
+			<ReaderPanel schema={ReadFileForm} readers={readers} />
 		</main>
 	);
 }
 
 function ReaderPanel({
-	title,
 	schema,
 	readers,
 }: {
-	title: string;
 	/** Validates the form; its type is the form's values. */
 	schema: ReadFileForm;
 	// One call per reader; the switch picks which one a submit makes.
 	readers: Record<
 		Reader,
-		(
-			name: string,
-		) => Effect.Effect<string, ReadFailure, BffClient | BffRpcClient>
+		(name: string) => Effect.Effect<string, ReadFailure, BffRpcClient>
 	>;
 }) {
 	// The types come from the schema, spelled out because inference through
@@ -79,7 +74,6 @@ function ReaderPanel({
 
 	return (
 		<section className="panel">
-			<h2>{title}</h2>
 			<form onSubmit={submit}>
 				<input
 					aria-label="File name"

@@ -11,6 +11,7 @@ export default defineConfig({
 		host: "127.0.0.1",
 		port: Number(process.env.EFFECT_PLAYGROUND_PORT ?? 5200),
 		strictPort: true,
-		proxy: { "/api": target, "/rpc": target },
+		// Only /rpc: the page uses the BFF's RPC, not its REST API.
+		proxy: { "/rpc": target },
 	},
 });
