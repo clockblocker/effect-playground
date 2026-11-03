@@ -145,16 +145,16 @@ What each transport serves:
 - RPC, which the page uses: `ReadFile({ name })` and
   `CustomCat({ inputFile, outputFile })`, both over `POST /rpc`.
 - REST, for other clients: `GET /api/files/read/:name` and
-  `POST /api/files/copy`, whose JSON body is `CustomCat.Request`. A client
-  HttpApi derives from `BffApi` calls them as
+  `POST /api/files/copy`, whose JSON body is `CustomCat.RequestShape`. A
+  client HttpApi derives from `BffApi` calls them as
   `client.files.read({ params: { name } })` and
   `client.files.copy({ payload })`. An `InvalidRequest` is a 422 whose body
   is its JSON, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"Expected a string matching the RegExp ^.+\\.txt$","path":["name"]}]}`.
 - MCP, for MCP clients: the `custom_cat` tool, over Streamable HTTP at
   `/mcp`, protocol 2025-11-25 or 2025-06-18. Its parameters are
-  `CustomCat.Request`; an `InvalidRequest` comes back as a tool error whose
-  text has a line per issue, its field first:
+  `CustomCat.RequestShape`; `custom_cat`'s `InvalidRequest` comes back as a
+  tool error whose text has a line per issue, its field first:
   `inputFile: String 'config.json' did not match format '.txt file name': '^.+\.txt$'.`
 
 For example, after `initialize` (whose response carries `mcp-session-id`)
@@ -210,45 +210,65 @@ at shell scripts.
 
 ## The protocol
 
-The C++ structs in `cpp/include/protocol.hpp` define each procedure's
-request and success: `ReadFile`, which `BffReader` serves, and `CustomCat`,
-which `custom_cat` runs. `Procedures` lists them. Both fail with
-`InvalidRequest`, a list of `Issue`s, which are structs there too, or with
-`IoFailed`, whose static `message` is a template over its fields. Fields are
-snake_case in C++ and camelCase in JSON, through reflect-cpp's
-`SnakeCaseToCamelCase` (`protocol::Wire`).
+The C++ structs in `cpp/include/protocol.hpp` define `CustomCat`'s request
+and success, which `custom_cat` runs. `Procedures` lists the procedures,
+`CustomCat` alone. A procedure fails with `InvalidRequest`, a list of
+`Issue`s, which are structs there too, or with `IoFailed`, whose static
+`message` is a template over its fields. Fields are snake_case in C++ and
+camelCase in JSON, through reflect-cpp's `SnakeCaseToCamelCase`
+(`protocol::Wire`).
 
-A field carries its rules in its type, a `Checked<Base, Rules...>`
-(`cpp/include/checked.hpp`). A rule has a name, a message template and
-a check:
+A field carries its rules in its type, a `Checked<Base, Validators...>`
+(`cpp/include/checked.hpp`) of reflect-cpp validators: reflect-cpp's own
+where it has one, and otherwise a struct with reflect-cpp's validator
+interface, `static rfl::Result<T> validate(T)`:
 
 ```cpp
-struct TxtFile {
-	static constexpr std::string_view name = "NotTxtFile";
-	static constexpr std::string_view message = "\"{value}\" is not a .txt file";
-	static bool passes(const std::string& value);
+using PlainName =
+	rfl::PatternValidator<R"(^(?!\.\.?$)[^/\\]*$)", "plain file name">;
+using TxtFile = rfl::PatternValidator<R"(^.+\.txt$)", ".txt file name">;
+struct NotALink {
+	static rfl::Result<std::string> validate(const std::string& name);
 };
-using Name = Checked<std::string, MinLength<5>, MaxLength<25>>;
+using Name = Checked<std::string, rfl::Size<rfl::Minimum<5>>,
+					 rfl::Size<rfl::Maximum<25>>>;
 using FileName = Checked<Name, PlainName, TxtFile>;
 using InFiles = Checked<FileName, NotALink>;
 using Existing = Checked<InFiles, ExistingFile>;
 ```
 
-`{value}` stands for the field's value, and `{limit}` for a bound's limit. A
-`Checked` whose base is another one only runs its rules on a value the base
-accepts, so `x.md` is too short and nothing else, and the rules come before
-what the files say. `input_file` is `Existing` and `output_file` `InFiles`,
-so only the input must exist.
+An issue's message is the validator's error, `rfl::Error::what()`, as it
+is:
 
-A rule across fields lives on the request, in its `Rules`, and names the
-member its issue goes on:
+| Rule | Validator | Message |
+|---|---|---|
+| 5 or more characters | `rfl::Size<rfl::Minimum<5>>` | `Size validation failed: Value expected to be greater than or equal to 5, but got 4.` |
+| 25 or fewer | `rfl::Size<rfl::Maximum<25>>` | `Size validation failed: Value expected to be less than or equal to 25, but got 27.` |
+| a plain name | `PlainName` | `String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.` |
+| `.txt` | `TxtFile` | `String 'config.json' did not match format '.txt file name': '^.+\.txt$'.` |
+| not a link | `NotALink` | `"out.txt" is a link, which could lead outside the files directory` |
+| exists | `ExistingFile` | the `std::error_code`'s message: `No such file or directory` |
+| not the input | `DifferentNames` | `Must not be the input file` |
+| not a hard link to the input | `DifferentFiles` | `"same.txt" is the input file under another name` |
+| present | none: the walker | `Required` |
+
+`rfl::Size` counts a string's bytes, while JSON Schema's `minLength` and
+`maxLength`, and so the form, count code points: a name of non-ASCII
+letters can pass the form and be too long for `custom_cat`.
+
+A `Checked` whose base is another one only runs its validators on a value
+the base accepts, so `x.md` is too short and nothing else, and the rules
+come before what the files say. `input_file` is `Existing` and
+`output_file` `InFiles`, so only the input must exist.
+
+A rule across fields lives on the request, in its `Rules`: a validator of
+the struct, which names the member its issue goes on:
 
 ```cpp
 struct DifferentNames {
-	static constexpr std::string_view name = "SameAsInput";
-	static constexpr std::string_view message = "Must not be the input file";
 	static constexpr auto field = &CustomCatRequest::output_file;
-	static bool passes(const CustomCatRequest& request);
+	static rfl::Result<CustomCatRequest> validate(
+		const CustomCatRequest& request);
 };
 // in CustomCatRequest:
 using Rules = std::tuple<DifferentNames, DifferentFiles>;
@@ -261,68 +281,64 @@ reflect-cpp reads a request without the rules: any value fits a `Checked`,
 and with `rfl::DefaultIfMissing` an absent one is missing rather than an
 error. Then `validate::validate` (`cpp/include/validate.hpp`) walks the
 request's fields with `rfl::to_view`, into nested structs and arrays, runs
-every field's rules, then each struct's, and collects an `Issue` for each
-that fails, its path the fields' wire names and the arrays' indexes, such as
-`["files", 2, "input"]`.
+every field's validators, then each struct's, and collects an `Issue` for
+each that fails, its path the fields' wire names and the arrays' indexes,
+such as `["files", 2, "input"]`. A missing field is the one message the
+walker writes, `Required`: reflect-cpp's own, `Field named 'output-file' not
+found.`, only comes from a read that fails as a whole, with no field to put
+it on.
 
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
-   writes `cpp/protocol.schema.json`. A bound's `rfl::Size` validator becomes
-   `minLength` or `maxLength`, and `PlainName`'s `rfl::PatternValidator` a
-   `pattern`. The tool adds `x-issues`, each rule's template, by its name,
-   and, for a rule with a schema, the keyword that carries it, and
+   writes `cpp/protocol.schema.json`. A validator with a schema becomes its
+   keyword: `rfl::Size` `minLength` or `maxLength`, a `PatternValidator` a
+   `pattern`; `NotALink` and `ExistingFile` have none. The tool adds
    `x-errors`, the template of each error besides `InvalidRequest`.
 2. `scripts/generate.ts` turns that into Effect Schema in one module,
    `src/shared/generated/protocol.ts`: a TypeScript namespace per method,
-   named after it, such as `ReadFile`. In it, `Request` and `Success` are the
-   payload and the success, `Path` the union of every field's path and `[]`,
-   the whole request, such as
+   named after it, `CustomCat`. In it, `Request` and `Success` are the
+   payload and the success, and `RequestShape` is `Request` without its
+   checks, nested structs inlined. Each keyword becomes Effect's check, with
+   Effect's own message: `Schema.isMinCodePoints(5)`,
+   `Schema.isPattern(/^.+\.txt$/u)`. `Path` is the union of every field's
+   path and `[]`, the whole request, such as
    `readonly ["inputFile"] | readonly ["outputFile"] | readonly []`, `Issue`
    an issue at one of them, `{ message, path }`, and `InvalidRequest` a
    `Schema.TaggedError` with a non-empty `issues`, whose `message` joins
-   theirs. `Failure` is `InvalidRequest` or
-   `IoFailed` (`Failure`, because an `Error` there would shadow the global
-   one). `IoFailed` is declared once, before the namespaces, a
-   `Schema.TaggedError` whose `message` fills in its template. Each
-   name is both the schema and its type, so `ReadFile.Success` works in
-   either position, and TypeScript 7 hovers read `ReadFile.Success`. Before
-   the namespaces, `IssueMessage` has a function per rule, by its name, that
-   fills in its template, such as
-   `IssueMessage.NotTxtFile({ value })`, and `fieldOf(path)` turns a path into
-   react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
-   `"inputFile"`, a path `["files", number, "input"]` is
-   `` `files.${number}.input` ``.
-3. `BffReader` fails with `ReadFile.InvalidRequest`, its issues worded by
-   `IssueMessage`, or `IoFailed`, and `src/shared/rest-api.ts` gives them
-   statuses 422 and 500.
+   theirs. `Failure` is `InvalidRequest` or `IoFailed` (`Failure`, because
+   an `Error` there would shadow the global one). `IoFailed` is declared
+   once, before the namespaces, a `Schema.TaggedError` whose `message` fills
+   in its template. Each name is both the schema and its type, so
+   `CustomCat.Success` works in either position, and TypeScript 7 hovers read
+   `CustomCat.Success`.
+3. The page's copy form validates with `CustomCat.Request`; the RPC payload,
+   the REST body and the MCP tool's parameters are `CustomCat.RequestShape`.
 
-A bound or a pattern travels as its JSON Schema keyword, and the TS field
-checks it with the message of the rule that carries that keyword:
-`Schema.String.check(Schema.isMinCodePoints(5, { message: IssueMessage.TooShort({ limit: 5 }) }), …)`.
-Each boundary rejects a name out of bounds, or a path:
+`ReadFile` is written by hand in `src/shared/read-file.ts`, in the same
+shape: a namespace with `Request`, whose name has the same rules as a copy's
+names, `RequestShape`, `Success`, `Path`, `Issue`, `InvalidRequest` and
+`Failure`, which reuses the generated `IoFailed`. The page's read form
+validates with `ReadFile.Request`, and the RPC payload and REST `:name` are
+its `RequestShape`. `BffReader` decodes the name with
+`ReadFile.Request.fields.name`, and a name it rejects is an issue with the
+decode's message, such as
+`Expected a string with at least 5 code points`. Then it refuses a link, a
+literal, `"out.txt" is a link, which could lead outside the files directory`,
+and a file that doesn't exist with the system's message,
+`no such file or directory`. `src/shared/rest-api.ts` gives
+`InvalidRequest` 422 and `IoFailed` 500.
 
-- REST: `:name` is `ReadFile.Request.fields.name`, so HttpApi rejects it
-  before the handler and answers a 422 with the issue, and a client HttpApi
-  derives fails with a `SchemaError` before sending anything.
-- RPC: the client can't encode the payload and dies before sending. A raw
-  request gets an `Exit` whose cause is a `Die` with the schema's message.
-- The page: each form's react-hook-form validates against the same field,
-  so it shows the message under that input and never sends the request.
-- MCP: the tool's parameters don't decode, so the call is a tool error.
-- `custom_cat`: a `TooShort`, `TooLong` or `NotPlainName` issue, with exit 1.
-
-The rest, `.txt`, links, existence and the rules across fields, only the
-BFF and `custom_cat` check.
+`fieldOf(path)` (`src/shared/field-of.ts`) turns either method's path into
+react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
+`"inputFile"`, a path `["files", number, "input"]` is
+`` `files.${number}.input` ``.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
 re-emits the schema and regenerates the TypeScript. Both outputs are
 committed. `bun run generate:check` fails if either is stale, or if
 `src/shared/generated/` holds a file the generator no longer writes. The
-generator fails on a template that names anything but `{value}` (or only
-`{limit}`, for a rule a keyword carries), on a keyword no rule carries or two
-rules carry, on an Issue with more than `message` and `path`, on an error's
-template that
-names anything but its fields, and on an error's field that would shadow the
-`Error`'s own, such as `message`.
+generator fails on an Issue with more than `message` and `path`, on an
+error's template that names anything but its fields, and on an error's
+field that would shadow the `Error`'s own, such as `message`.
 
 ## Checks
 
@@ -344,19 +360,20 @@ type tests, which `bun run check` runs.
 - `cpp/` holds the protocol's structs, `Checked` and the walker, `custom_cat`
   and the tool that emits the schema. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import: the REST API
-  (`BffApi`), the RPC group (`BffRpcs`), `CliFailed`, and the generated
-  protocol.
-- `src/server/` is the BFF: `BffReader` and `CustomCatCli`, and the three
-  transports mounted on one router.
+  (`BffApi`), the RPC group (`BffRpcs`), `CliFailed`, `ReadFile`, `fieldOf`,
+  and the generated protocol.
+- `src/server/` is the BFF: `bun-side/` holds `BffReader`, `cpp-side/`
+  `CustomCatCli`, and `protocols/` the three transports, which `main.ts`
+  mounts on one router.
 - `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
   `BffRpcClient`, with a mutation per procedure, `readFile` and `customCat`.
   The client's runtime is an atom too, so the protocol is built once, not per
   submit. `main.tsx` wraps the page in `@effect/atom-react`'s
   `RegistryProvider`, which holds the atoms. `App` renders two forms,
   `forms/read-file.tsx` (`ReadFileForm`) and `forms/run-cli.tsx`
-  (`RunCliForm`), and passes each its schema, the generated `ReadFile.Request`
-  or `CustomCat.Request`, which its react-hook-form resolver uses. Each runs
-  its procedure's mutation, which holds an `AsyncResult` of the success
+  (`RunCliForm`), and passes each its schema, `ReadFile.Request` or the
+  generated `CustomCat.Request`, which its react-hook-form resolver uses.
+  Each runs its procedure's mutation, which holds an `AsyncResult` of the success
   struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
   a copy) or the client's `RpcClientError`: `Atom.Failure<typeof customCat>`.
   `forms/shared.tsx` holds what both use: the resolver hook, a text field with

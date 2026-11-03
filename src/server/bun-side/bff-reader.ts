@@ -100,6 +100,6 @@ export class BffReader extends Context.Service<
 	}
 
 	static readonly layer = BffReader.layerIn(
-		join(import.meta.dirname, "../.."),
+		join(import.meta.dirname, "../../.."),
 	);
 }

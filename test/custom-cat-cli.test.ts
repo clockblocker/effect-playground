@@ -14,7 +14,10 @@ import {
 	Result,
 } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
-import { ContractMismatch, CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import {
+	ContractMismatch,
+	CustomCatCli,
+} from "../src/server/cpp-side/custom-cat.ts";
 import { CliFailed } from "../src/shared/cli-failed.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 

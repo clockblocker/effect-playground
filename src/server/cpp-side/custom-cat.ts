@@ -13,7 +13,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CliFailed } from "../../shared/cli-failed.ts";
 import { CustomCat, IoFailed } from "../../shared/generated/protocol.ts";
 
-const root = join(import.meta.dirname, "../..");
+const root = join(import.meta.dirname, "../../..");
 
 const decodeSuccess = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(CustomCat.Success),
