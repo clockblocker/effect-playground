@@ -1,7 +1,6 @@
 #pragma once
 
 #include <map>
-#include <optional>
 #include <rfl.hpp>
 #include <string>
 #include <tuple>
@@ -96,13 +95,10 @@ class Checked {
 	Checked() = default;
 	Checked(Raw value) : value_(std::move(value)) {}
 
-	bool missing() const noexcept { return !value_.has_value(); }
-
-	// Only for a value validate() accepted, which is never missing.
-	const Raw& value() const { return value_.value(); }
+	const Raw& value() const noexcept { return value_; }
 
    private:
-	std::optional<Raw> value_;
+	Raw value_{};
 };
 
 namespace rfl::parsing {

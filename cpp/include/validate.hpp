@@ -93,11 +93,7 @@ void walk(const T& value, std::vector<PathSegment>& path,
 	if constexpr (rfl::internal::is_description_v<T>) {
 		walk(value.get(), path, issues);
 	} else if constexpr (checked::is_checked_v<T>) {
-		if (value.missing()) {
-			issues.push_back(Issue{.message = "Required", .path = path});
-		} else {
-			check(std::type_identity<T>(), value.value(), path, issues);
-		}
+		check(std::type_identity<T>(), value.value(), path, issues);
 	} else if constexpr (is_vector<T>::value) {
 		for (std::size_t index = 0; index < value.size(); ++index) {
 			path.emplace_back(static_cast<int>(index));

@@ -110,10 +110,8 @@ CustomCatSuccess copy(const CustomCatRequest& request) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-	// A missing flag parses too, so that validate() reports it.
 	const auto request =
-		rfl::cli::read<CustomCatRequest, rfl::NoExtraFields,
-					   rfl::DefaultIfMissing>(argc, argv);
+		rfl::cli::read<CustomCatRequest, rfl::NoExtraFields>(argc, argv);
 	if (!request) {
 		std::cerr << "custom_cat: " << request.error().what() << "\n";
 		return exit_usage;

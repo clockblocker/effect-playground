@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
 		return 2;
 	}
 	const auto batch =
-		rfl::json::read<Batch, protocol::Wire, rfl::DefaultIfMissing>(argv[1]);
+		rfl::json::read<Batch, protocol::Wire>(argv[1]);
 	if (!batch) {
 		std::cerr << batch.error().what() << "\n";
 		return 2;

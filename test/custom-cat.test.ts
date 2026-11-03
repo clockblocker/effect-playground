@@ -168,12 +168,11 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 	});
 
-	test("reports a missing flag on its field", async () => {
+	test("rejects a missing flag as a usage error, in reflect-cpp's words", async () => {
 		const result = await customCat(["--input-file=hello.txt"]);
-		expect(result.exitCode).toBe(1);
-		expect(invalidRequest(result.stdout).issues).toEqual([
-			{ message: "Required", path: ["outputFile"] },
-		]);
+		expect(result.exitCode).toBe(2);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain("Field named 'output-file' not found.");
 	});
 
 	test("counts a name's code points, not its bytes, as the form does", async () => {

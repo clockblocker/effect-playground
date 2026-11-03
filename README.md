@@ -195,11 +195,11 @@ reader (`rfl/cli.hpp`) spells in kebab-case. Both names follow the read's
 rules, and only the input must exist. What it prints, and its exit codes:
 
 - 0, copied: stdout is `{"_tag":"Success","bytesCopied":18}`.
-- 1, a field is wrong, or missing: stdout is the `InvalidRequest`, with
+- 1, a field's value is wrong: stdout is the `InvalidRequest`, with
   every issue, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["inputFile"]},{"message":"String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["outputFile"]}]}`.
-- 2, a usage error that names no field, such as an unknown flag:
-  reflect-cpp's error, on stderr.
+- 2, a usage error, such as a missing or unknown flag: reflect-cpp's
+  error, on stderr, e.g. `Field named 'output-file' not found.`
 - 3, a file couldn't be read or written: stdout is the `IoFailed`, such as
   `{"_tag":"IoFailed","message":"Is a directory"}`.
 - 4, anything else, which would be a bug in `custom_cat`: on stderr.
@@ -263,7 +263,6 @@ is:
 | exists | `ExistingFile` | the `std::error_code`'s message: `No such file or directory` |
 | not the input | `DifferentNames` | `Must not be the input file` |
 | not a hard link to the input | `DifferentFiles` | `"same.txt" is the input file under another name` |
-| present | none: the walker | `Required` |
 
 `CodePoints<V>` is `rfl::Size<V>` counting a string's code points, not its
 bytes, with `Size`'s schema: JSON Schema's `minLength` and `maxLength`, and
@@ -291,16 +290,14 @@ using Rules = std::tuple<DifferentNames, DifferentFiles>;
 They run in order once every field passes its own rules, and stop at the
 first that fails, as a `Checked`'s refinements do.
 
-reflect-cpp reads a request without the rules: any value fits a `Checked`,
-and with `rfl::DefaultIfMissing` an absent one is missing rather than an
-error. Then `validate::validate` (`cpp/include/validate.hpp`) walks the
+reflect-cpp reads a request without the rules: any value fits a `Checked`.
+A missing or unknown field fails that read, a usage error in reflect-cpp's
+own words. Then `validate::validate` (`cpp/include/validate.hpp`) walks the
 request's fields with `rfl::to_view`, into nested structs and arrays, runs
 every field's validators, then each struct's, and collects an `Issue` for
 each that fails, its path the fields' wire names and the arrays' indexes,
-such as `["files", 2, "input"]`. A missing field is the one message the
-walker writes, `Required`: reflect-cpp's own, `Field named 'output-file' not
-found.`, only comes from a read that fails as a whole, with no field to put
-it on.
+such as `["files", 2, "input"]`: reflect-cpp gives each issue its message,
+and the walker its path.
 
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its

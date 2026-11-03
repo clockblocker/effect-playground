@@ -32,7 +32,7 @@ const invalid = new CustomCat.InvalidRequest({
 	issues: [
 		{ message: "first", path: ["outputFile"] },
 		{ message: "second", path: ["outputFile"] },
-		{ message: "Required", path: ["inputFile"] },
+		{ message: "No such file or directory", path: ["inputFile"] },
 	],
 });
 
@@ -53,7 +53,10 @@ describe("setIssues", () => {
 		setIssues(invalid.issues, (name, error) => errors.push([name, error]));
 		expect(errors).toEqual([
 			["outputFile", { type: "server", message: "first" }],
-			["inputFile", { type: "server", message: "Required" }],
+			[
+				"inputFile",
+				{ type: "server", message: "No such file or directory" },
+			],
 		]);
 	});
 });

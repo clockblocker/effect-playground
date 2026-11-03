@@ -10,7 +10,6 @@ const short =
 	"Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.";
 const notTxt = (name: string) =>
 	`String '${name}' did not match format '.txt file name': '^.+\\.txt$'.`;
-const required = "Required";
 
 /** The [message, ...path] of each issue the C++ walker finds in `batch`. */
 function issues(batch: object): unknown[] {
@@ -39,6 +38,7 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 			issues({
 				files: [{ input: "hello.txt", outputFile: "copy.txt" }],
 				label: "label.txt",
+				tags: [],
 			}),
 		).toEqual([]);
 	});
@@ -48,26 +48,29 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 			issues({
 				files: [
 					{ input: "hello.txt", outputFile: "copy.txt" },
-					{ input: "x.md" },
+					{ input: "x.md", outputFile: "copy.txt" },
 					{ input: "missing.txt", outputFile: "out.json" },
 				],
 				label: "label.md",
+				tags: [],
 			}),
 		).toEqual([
 			[short, "files", 1, "input"],
-			[required, "files", 1, "outputFile"],
 			["No such file or directory", "files", 2, "input"],
 			[notTxt("out.json"), "files", 2, "outputFile"],
 			[notTxt("label.md"), "label"],
 		]);
 	});
 
-	test("reports a missing field at any depth", () => {
-		expect(issues({ files: [{}] })).toEqual([
-			[required, "files", 0, "input"],
-			[required, "files", 0, "outputFile"],
-			[required, "label"],
-		]);
+	test("leaves a missing field to reflect-cpp's read, at any depth", () => {
+		const result = Bun.spawnSync(
+			[validateFixtureBinary, JSON.stringify({ files: [{}] })],
+			{ cwd: directory },
+		);
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr.toString()).toContain(
+			"Field named 'input' not found.",
+		);
 	});
 
 	test("runs a struct's rules once its fields pass theirs", () => {
@@ -78,6 +81,7 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 					{ input: "missing.txt", outputFile: "missing.txt" },
 				],
 				label: "label.txt",
+				tags: [],
 			}),
 		).toEqual([
 			["Must not be the input file", "files", 0, "outputFile"],

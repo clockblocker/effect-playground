@@ -153,10 +153,12 @@ describe("generated protocol", () => {
 		const invalid = new CustomCat.InvalidRequest({
 			issues: [
 				{ message: "No such file or directory", path: ["inputFile"] },
-				{ message: "Required", path: ["outputFile"] },
+				{ message: "Must not be the input file", path: ["outputFile"] },
 			],
 		});
-		expect(invalid.message).toBe("No such file or directory; Required");
+		expect(invalid.message).toBe(
+			"No such file or directory; Must not be the input file",
+		);
 		expect(String(invalid)).toStartWith("InvalidRequest: ");
 		expect(
 			Object.keys(Schema.encodeSync(CustomCat.InvalidRequest)(invalid)),
