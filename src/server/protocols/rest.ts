@@ -4,27 +4,12 @@ import {
 	type HttpApiError,
 	HttpApiMiddleware,
 } from "effect/http-api";
-import {
-	CustomCat,
-	IssueMessage,
-	ReadFile,
-} from "../shared/generated/protocol.ts";
-import {
-	BffApi,
-	CustomCatSchemaErrors,
-	ReadFileSchemaErrors,
-} from "../shared/rest-api.ts";
-import { BffReader } from "./bff-reader.ts";
-import { CustomCatCli } from "./custom-cat.ts";
+import { CustomCat } from "../../shared/generated/protocol.ts";
+import { BffApi, CustomCatSchemaErrors } from "../../shared/rest-api.ts";
+import { BffReader } from "../bun-side/bff-reader.ts";
+import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 
-const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1({
-	leafHook: (leaf) =>
-		leaf._tag === "MissingKey"
-			? IssueMessage.Missing()
-			: leaf._tag === "UnexpectedKey"
-				? "Unknown field"
-				: SchemaIssue.defaultLeafHook(leaf),
-});
+const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
  * Any request that doesn't decode, as the method's InvalidRequest. An issue
@@ -52,15 +37,9 @@ const asInvalidRequest = <I>(method: {
 		}).pipe(Effect.orDie, Effect.flip);
 };
 
-const SchemaErrorLayers = Layer.mergeAll(
-	HttpApiMiddleware.layerSchemaErrorTransform(
-		ReadFileSchemaErrors,
-		asInvalidRequest(ReadFile),
-	),
-	HttpApiMiddleware.layerSchemaErrorTransform(
-		CustomCatSchemaErrors,
-		asInvalidRequest(CustomCat),
-	),
+const SchemaErrors = HttpApiMiddleware.layerSchemaErrorTransform(
+	CustomCatSchemaErrors,
+	asInvalidRequest(CustomCat),
 );
 
 const FilesHandlers = HttpApiBuilder.group(
@@ -81,5 +60,5 @@ const FilesHandlers = HttpApiBuilder.group(
 
 export const RestRoutes = HttpApiBuilder.layer(BffApi).pipe(
 	Layer.provide(FilesHandlers),
-	Layer.provide(SchemaErrorLayers),
+	Layer.provide(SchemaErrors),
 );

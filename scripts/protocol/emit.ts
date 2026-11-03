@@ -2,7 +2,6 @@ import { SchemaRepresentation } from "effect";
 import {
 	type Definition,
 	type ErrorTemplate,
-	type IssueTemplate,
 	type Procedure,
 	type Protocol,
 	placeholder,
@@ -13,13 +12,13 @@ import {
  * after the C++ namespace, such as `protocol.ts`.
  *
  * Each procedure gets a TypeScript namespace of its own name. In it, its
- * payload is `Request` and its success `Success`; `Path` lists where in a
- * request an issue can be, `Issue` is a problem there, and `InvalidRequest`
- * holds them. `Failure` is `InvalidRequest` or one of its other errors,
- * such as `IoFailed`. Every other definition only it uses keeps its own
- * name. A definition more than one procedure uses is declared once, before
- * the namespaces, as are the rules' messages, and the errors besides
- * InvalidRequest.
+ * payload is `Request`, `RequestShape` the same without its checks, and its
+ * success `Success`; `Path` lists where in a request an issue can be, `Issue`
+ * is a problem there, and `InvalidRequest` holds them. `Failure` is
+ * `InvalidRequest` or one of its other errors, such as `IoFailed`. Every
+ * other definition only it uses keeps its own name. A definition more than
+ * one procedure uses is declared once, before the namespaces, as are the
+ * errors besides InvalidRequest.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -30,13 +29,9 @@ export function emit(
 	protocol: Protocol,
 	header: readonly string[],
 ): { readonly file: string; readonly source: string } {
-	const { namespace, procedures, definitions, issues, errors } = protocol;
+	const { namespace, procedures, definitions, errors } = protocol;
 	for (const { definition } of errors) {
-		if (
-			[...roleNames, ...topLevelNames].includes(
-				definition.name as (typeof roleNames)[number],
-			)
-		) {
+		if ((roleNames as readonly string[]).includes(definition.name)) {
 			throw new Error(
 				`${definition.name} would clash with the generated ${definition.name}; rename the struct`,
 			);
@@ -71,11 +66,6 @@ export function emit(
 					"generator can only share other definitions",
 			);
 		}
-		if ((topLevelNames as readonly string[]).includes(name)) {
-			throw new Error(
-				`${name} would clash with the generated ${name}; rename the struct`,
-			);
-		}
 	}
 	// Each procedure's names are in dependency order, so their first
 	// occurrences are too.
@@ -90,11 +80,10 @@ export function emit(
 		"",
 		'import { Schema } from "effect";',
 		"",
-		issueDeclarations(issues),
 		...sharedNames.map((name) =>
-			declare(required(definitions, name), definitions, issues),
+			declare(required(definitions, name), definitions),
 		),
-		...errors.map((error) => errorDeclaration(error, definitions, issues)),
+		...errors.map((error) => errorDeclaration(error, definitions)),
 		...uses.map(({ procedure, names }) =>
 			procedureNamespace(procedure, names, shared, protocol),
 		),
@@ -106,8 +95,8 @@ export function emit(
 }
 
 const namespaceNote = [
-	"A namespace per method makes `ReadFile.Success` both the schema and its",
-	"type, and TypeScript 7 hovers read `ReadFile.Success`. Namespaces are",
+	"A namespace per method makes `CustomCat.Success` both the schema and its",
+	"type, and TypeScript 7 hovers read `CustomCat.Success`. Namespaces are",
 	"TypeScript-only syntax that emits code, which Bun and Vite both compile.",
 	"What more than one method uses is declared once, before the namespaces.",
 ];
@@ -115,6 +104,7 @@ const namespaceNote = [
 /** The names a procedure's namespace declares itself. */
 const roleNames = [
 	"Request",
+	"RequestShape",
 	"Success",
 	"Path",
 	"Issue",
@@ -122,70 +112,13 @@ const roleNames = [
 	"Failure",
 ] as const;
 
-/** The names declared before the namespaces, whatever the protocol. */
-const topLevelNames = ["IssueMessage", "FieldOf", "fieldOf"] as const;
-
-/**
- * `IssueMessage`, with a function per rule that fills in its template, and
- * `fieldOf`, which names an issue's field the way react-hook-form does.
- */
-function issueDeclarations(issues: readonly IssueTemplate[]): string {
-	const message = ({ name: rule, message }: IssueTemplate) => {
-		const names = [
-			...new Set(
-				[...message.matchAll(placeholder)].map(([, name = ""]) => name),
-			),
-		];
-		const parameter =
-			names.length === 0
-				? ""
-				: `{ ${names.join(", ")} }: { ${names
-						.map(
-							(name) =>
-								`readonly ${name}: ${name === "value" ? "string" : "number"}`,
-						)
-						.join("; ")} }`;
-		const body =
-			names.length === 0
-				? JSON.stringify(message)
-				: templateCode(message);
-		return `${rule}: (${parameter}) => ${body},`;
-	};
-	return [
-		"/** Each rule's message, from its C++ template, by the rule's name. */",
-		"export const IssueMessage = {",
-		...issues.map(message),
-		"} as const;",
-		"",
-		fieldOfCode,
-	].join("\n");
-}
-
-// The same for every protocol: react-hook-form names a field by its path.
-const fieldOfCode = `type Segments = ReadonlyArray<string | number>;
-
-/** The react-hook-form name of the field at a path: \`["files", 2, "input"]\` → \`"files.2.input"\`. */
-export type FieldOf<P extends Segments> = P extends readonly [
-	infer Head extends string | number,
-	...infer Rest extends Segments,
-]
-	? Rest extends readonly []
-		? \`\${Head}\`
-		: \`\${Head}.\${FieldOf<Rest>}\`
-	: never;
-
-/** The react-hook-form name of the field an issue's path points at. */
-export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
-	path.join(".") as FieldOf<P>;
-`;
-
 function procedureNamespace(
 	procedure: Procedure,
 	names: readonly string[],
 	shared: ReadonlySet<string>,
 	protocol: Protocol,
 ): string {
-	const { definitions, issues } = protocol;
+	const { definitions } = protocol;
 	const { payload, success } = procedure;
 	for (const name of names) {
 		if (
@@ -221,12 +154,7 @@ function procedureNamespace(
 	const declarations = names
 		.filter((name) => !shared.has(name))
 		.map((name) =>
-			declare(
-				required(definitions, name),
-				definitions,
-				issues,
-				roles.get(name),
-			),
+			declare(required(definitions, name), definitions, roles.get(name)),
 		);
 	const sameStruct =
 		success === payload
@@ -238,12 +166,16 @@ function procedureNamespace(
 				]
 			: [];
 
+	// First, as it fails on a struct that contains itself, which the shape
+	// would inline forever.
+	const path = pathDeclaration(procedure, definitions);
 	return [
 		`/** What the ${procedure.name} method takes, succeeds with and fails with. */`,
 		`export namespace ${procedure.name} {`,
 		...declarations,
+		shapeDeclaration(procedure, definitions),
 		...sameStruct,
-		pathDeclaration(procedure, definitions),
+		path,
 		issueDeclaration(procedure, protocol.issue),
 		invalidRequestDeclaration(procedure, protocol.invalidRequest),
 		`/** What ${procedure.name} fails with. */`,
@@ -265,7 +197,6 @@ function procedureNamespace(
 function errorDeclaration(
 	{ definition, message }: ErrorTemplate,
 	definitions: ReadonlyMap<string, Definition>,
-	issues: readonly IssueTemplate[],
 ): string {
 	const { name, tag = name } = definition;
 	const { _tag: _, ...properties } = definition.schema.properties as Record<
@@ -275,7 +206,6 @@ function errorDeclaration(
 	const fields = fieldsOf(
 		{ ...definition, schema: { ...definition.schema, properties } },
 		definitions,
-		issues,
 	);
 	return [
 		...jsDoc(`An error that isn't about a field. Its message: ${message}`),
@@ -415,7 +345,6 @@ function docOf(definition: Definition, field: string): string[] {
 function declare(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
-	issues: readonly IssueTemplate[],
 	role?: readonly [name: string, doc: string],
 ): string {
 	if (definition.tag !== undefined) {
@@ -423,7 +352,7 @@ function declare(
 			`${definition.name} is tagged, but only InvalidRequest can be`,
 		);
 	}
-	const fields = fieldsOf(definition, definitions, issues);
+	const fields = fieldsOf(definition, definitions);
 	const [name, doc] = role ?? [definition.name];
 	return [
 		...(doc === undefined ? [] : [`/** ${doc} */`]),
@@ -437,7 +366,7 @@ function declare(
 	].join("\n");
 }
 
-/** `"{value}" is not a .txt file` → a template literal over `value`. */
+/** `Couldn't {operation}` → a template literal over `operation`. */
 function templateCode(template: string, scope = ""): string {
 	const parts = template.split(placeholder);
 	const code = parts.map((part, index) =>
@@ -454,7 +383,7 @@ function templateCode(template: string, scope = ""): string {
 function fieldsOf(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
-	issues: readonly IssueTemplate[],
+	shape = false,
 ): string[] {
 	const properties = definition.schema.properties as Record<
 		string,
@@ -464,7 +393,11 @@ function fieldsOf(
 		definition.schema.required as string[] | undefined,
 	);
 	return Object.entries(properties).flatMap(([field, schema]) => {
-		const code = fieldCode(schema, definitions, issues);
+		const code = shape
+			? withoutChecks(
+					fieldCode(inlined(schema, definitions), definitions),
+				)
+			: fieldCode(schema, definitions);
 		return [
 			...docOf(definition, field),
 			`${field}: ${required.has(field) ? code : `Schema.optionalKey(${code})`},`,
@@ -475,7 +408,6 @@ function fieldsOf(
 function fieldCode(
 	schema: Record<string, unknown>,
 	definitions: ReadonlyMap<string, Definition>,
-	issues: readonly IssueTemplate[],
 ): string {
 	const imported = SchemaRepresentation.fromJsonSchemaDocument(
 		{
@@ -499,47 +431,64 @@ function fieldCode(
 	const [root] = code.codes;
 	if (root === undefined) throw new Error("The engine emitted no code");
 	return mergeChecks(
-		root.runtime
-			.replaceAll(
-				'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
-				"Schema.Int",
-			)
-			.replaceAll(lengthBound, (_, bound = "", limit = "") => {
-				const keyword = bound === "Min" ? "minLength" : "maxLength";
-				return `Schema.is${bound}CodePoints(${limit}, ${checkOptions(issues, keyword, limit)})`;
-			})
-			.replaceAll(
-				patternCheck,
-				(_, pattern = "") =>
-					`Schema.isPattern(new RegExp(${pattern}, "u"), ${checkOptions(issues, "pattern")})`,
-			),
+		root.runtime.replaceAll(
+			'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
+			"Schema.Int",
+		),
 	);
 }
 
-/** The message of the rule that carries `keyword`, filled in. */
-function checkOptions(
-	issues: readonly IssueTemplate[],
-	keyword: string,
-	limit?: string,
+/**
+ * The request's fields with no checks, nested structs inlined: what a server
+ * decodes when the C++ checks the rules, so that the issues are the C++'s.
+ */
+function shapeDeclaration(
+	procedure: Procedure,
+	definitions: ReadonlyMap<string, Definition>,
 ): string {
-	const issue = issues.find((issue) => issue.keyword === keyword);
-	if (issue === undefined) {
-		throw new Error(`A field has a ${keyword}, but no rule carries one`);
-	}
-	const named = issue.message.includes("{limit}");
-	return `{ message: IssueMessage.${issue.name}(${named ? `{ limit: ${limit} }` : ""}) }`;
+	return [
+		`/** What ${procedure.name} takes, its fields' types without their rules. */`,
+		"export const RequestShape = Schema.Struct({",
+		...fieldsOf(
+			required(definitions, procedure.payload),
+			definitions,
+			true,
+		),
+		"});",
+		"export interface RequestShape extends Schema.Schema.Type<typeof RequestShape> {}",
+		"",
+	].join("\n");
 }
 
-// A string's minLength and maxLength (from a rule's rfl::Size) arrive as code
-// point checks, annotated with the very `expected` text each check has by
-// default. That annotation goes, and the check gets the message of the rule
-// that carries the keyword, as the C++ side words it.
-const lengthBound =
-	/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g;
+/** A schema with every `$ref` replaced by the struct it names. */
+function inlined(
+	schema: Record<string, unknown>,
+	definitions: ReadonlyMap<string, Definition>,
+): Record<string, unknown> {
+	const replace = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(replace);
+		if (typeof value !== "object" || value === null) return value;
+		const { $ref, ...rest } = value as Record<string, unknown>;
+		if (typeof $ref === "string") {
+			return replace(
+				required(definitions, $ref.slice("#/$defs/".length)).schema,
+			);
+		}
+		return Object.fromEntries(
+			Object.entries(rest).map(([key, item]) => [key, replace(item)]),
+		);
+	};
+	return replace(schema) as Record<string, unknown>;
+}
 
-// The same for a pattern, from a rule's rfl::PatternValidator.
-const patternCheck =
-	/Schema\.isPattern\(new globalThis\.RegExp\(("(?:[^"\\]|\\.)*"), "u"\)\)\.annotate\(\{ "expected": "(?:[^"\\]|\\.)*" \}\)/g;
+/** Drops every `.check(…)` call: `Schema.String.check(…)` → `Schema.String`. */
+function withoutChecks(runtime: string): string {
+	const open = ".check(";
+	const start = runtime.indexOf(open);
+	if (start === -1) return runtime;
+	const end = closingParen(runtime, start + open.length);
+	return runtime.slice(0, start) + withoutChecks(runtime.slice(end + 1));
+}
 
 /**
  * The engine chains one `.check(…)` per check; a hand-written schema passes

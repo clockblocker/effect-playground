@@ -1,18 +1,20 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
 import { CliFailed } from "./cli-failed.ts";
-import { CustomCat, ReadFile } from "./generated/protocol.ts";
+import { CustomCat } from "./generated/protocol.ts";
+import { ReadFile } from "./read-file.ts";
 
 // Every call is a POST to /rpc carrying { tag, payload }, such as
-// { tag: "ReadFile", payload: { name } }.
+// { tag: "ReadFile", payload: { name } }. A payload is decoded by its shape
+// alone, so a rule it breaks comes back as the method's InvalidRequest.
 export class BffRpcs extends RpcGroup.make(
 	Rpc.make("ReadFile", {
-		payload: ReadFile.Request,
+		payload: ReadFile.RequestShape,
 		success: ReadFile.Success,
 		error: ReadFile.Failure,
 	}),
 	Rpc.make("CustomCat", {
-		payload: CustomCat.Request,
+		payload: CustomCat.RequestShape,
 		success: CustomCat.Success,
 		error: Schema.Union([CustomCat.Failure, CliFailed]),
 	}),

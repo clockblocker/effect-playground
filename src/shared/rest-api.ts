@@ -7,7 +7,8 @@ import {
 	HttpApiSchema,
 } from "effect/http-api";
 import { CliFailed } from "./cli-failed.ts";
-import { CustomCat, IoFailed, ReadFile } from "./generated/protocol.ts";
+import { CustomCat, IoFailed } from "./generated/protocol.ts";
+import { ReadFile } from "./read-file.ts";
 
 // HttpApiSchema.status keeps what a schema decodes to and from, but Effect
 // types the annotated schema by its internals (decodeTo<declareConstructor…>),
@@ -24,10 +25,6 @@ const withStatus =
 	> =>
 		self.pipe(HttpApiSchema.status(code));
 
-// The generated field, so a name the protocol rejects (too short, too long,
-// a path) never reaches a handler.
-const params = { name: ReadFile.Request.fields.name };
-
 const readFileInvalid = ReadFile.InvalidRequest.pipe(withStatus(422));
 const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));
 
@@ -35,16 +32,10 @@ const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));
 const ioFailed = IoFailed.pipe(withStatus(500));
 
 /**
- * Turns a request the schema rejects, of the wrong shape or for a rule such
- * as a name too short, into the method's InvalidRequest, as the handler or
- * custom_cat would have.
+ * Turns a body of the wrong shape, which no handler sees, into the method's
+ * InvalidRequest. The body is decoded by its shape alone, so custom_cat
+ * checks the rules.
  */
-export class ReadFileSchemaErrors extends HttpApiMiddleware.Service<ReadFileSchemaErrors>()(
-	"effect-playground/ReadFileSchemaErrors",
-	{ error: readFileInvalid },
-) {}
-
-/** As ReadFileSchemaErrors, for a copy. */
 export class CustomCatSchemaErrors extends HttpApiMiddleware.Service<CustomCatSchemaErrors>()(
 	"effect-playground/CustomCatSchemaErrors",
 	{ error: customCatInvalid },
@@ -54,13 +45,14 @@ export class BffApi extends HttpApi.make("bff")
 	.add(
 		HttpApiGroup.make("files")
 			.add(
+				// BffReader checks the name's rules.
 				HttpApiEndpoint.get("read", "/files/read/:name", {
-					params,
+					params: ReadFile.RequestShape.fields,
 					success: Schema.String.pipe(HttpApiSchema.asText()),
 					error: [readFileInvalid, ioFailed],
-				}).middleware(ReadFileSchemaErrors),
+				}),
 				HttpApiEndpoint.post("copy", "/files/copy", {
-					payload: CustomCat.Request,
+					payload: CustomCat.RequestShape,
 					success: CustomCat.Success,
 					error: [
 						customCatInvalid,

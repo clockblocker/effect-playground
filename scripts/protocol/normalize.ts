@@ -27,22 +27,11 @@ export interface ErrorTemplate {
 	readonly message: string;
 }
 
-/** A rule's message, by the rule's name. */
-export interface IssueTemplate {
-	readonly name: string;
-	/** `{value}` stands for the field's value, `{limit}` for the rule's limit. */
-	readonly message: string;
-	/** The JSON Schema keyword that carries the limit, such as `minLength`. */
-	readonly keyword: string | undefined;
-}
-
 export interface Protocol {
 	/** The C++ namespace, such as `protocol`. */
 	readonly namespace: string;
 	readonly procedures: readonly Procedure[];
 	readonly definitions: ReadonlyMap<string, Definition>;
-	/** In the order the requests first use them. */
-	readonly issues: readonly IssueTemplate[];
 	/** The `Issue` and `InvalidRequest` structs, which every procedure shares. */
 	readonly issue: Definition;
 	readonly invalidRequest: Definition;
@@ -52,7 +41,6 @@ export interface Protocol {
 
 const definitionRef = "#/$defs/";
 const taggedSuffix = "__tagged";
-const issuesKeyword = "x-issues";
 const errorsKeyword = "x-errors";
 
 /** A `{name}` in a message template; splitting by it alternates text and name. */
@@ -125,7 +113,6 @@ export function normalize(document: unknown): Protocol {
 		if (root === undefined) throw new Error(`Unknown root ${ref}`);
 		return { ...root, ...procedure(root.name, definitions) };
 	});
-	const issues = issueTemplates(document[issuesKeyword]);
 	const invalidRequest = required(definitions, "InvalidRequest");
 	const issue = required(definitions, "Issue");
 	checkInvalidRequest(invalidRequest);
@@ -147,7 +134,6 @@ export function normalize(document: unknown): Protocol {
 			({ namespace: _, ...procedure }) => procedure,
 		),
 		definitions,
-		issues,
 		issue,
 		invalidRequest,
 		errors,
@@ -243,46 +229,6 @@ function procedure(
 		success: refName(field("success"), "success"),
 		errors: rest,
 	};
-}
-
-/**
- * The schema's "x-issues": each rule's template, whose every `{name}` is
- * `{value}`, or `{limit}` for a rule with a keyword, which no other rule
- * carries.
- */
-function issueTemplates(raw: unknown): IssueTemplate[] {
-	if (!Predicate.isObject(raw) || Object.keys(raw).length === 0) {
-		throw new Error(`Expected the rules' templates in "${issuesKeyword}"`);
-	}
-	const carriers = new Map<string, string>();
-	return Object.entries(raw).map(([rule, entry]) => {
-		const message = Predicate.isObject(entry) ? entry.message : undefined;
-		const keyword = Predicate.isObject(entry) ? entry.keyword : undefined;
-		if (typeof message !== "string") {
-			throw new Error(`${rule} has no message template`);
-		}
-		if (keyword !== undefined && typeof keyword !== "string") {
-			throw new Error(`${rule}'s keyword must be a string`);
-		}
-		if (keyword !== undefined) {
-			const other = carriers.get(keyword);
-			if (other !== undefined) {
-				throw new Error(`${other} and ${rule} both carry ${keyword}`);
-			}
-			carriers.set(keyword, rule);
-		}
-		// A schema check's message is the same for every value.
-		const names = keyword === undefined ? ["value"] : ["limit"];
-		for (const [, name = ""] of message.matchAll(placeholder)) {
-			if (!names.includes(name)) {
-				throw new Error(
-					`${rule}'s message names {${name}}, but only ` +
-						`${names.map((n) => `{${n}}`).join(" and ")} can be filled in`,
-				);
-			}
-		}
-		return { name: rule, message, keyword };
-	});
 }
 
 const properties = (definition: Definition) =>

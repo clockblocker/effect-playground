@@ -8,42 +8,26 @@ import {
 	Option,
 	Path,
 	type PlatformError,
+	Schema,
 } from "effect";
-import {
-	IoFailed,
-	IssueMessage,
-	ReadFile,
-} from "../shared/generated/protocol.ts";
+import { IoFailed } from "../../shared/generated/protocol.ts";
+import { ReadFile } from "../../shared/read-file.ts";
 
-const invalidName = (
-	rule: "NotTxtFile" | "LeavesFiles" | "FileNotFound",
-	name: string,
-) =>
-	new ReadFile.InvalidRequest({
-		issues: [
-			{
-				message: IssueMessage[rule]({ value: name }),
-				path: ["name"],
-			},
-		],
-	});
+const invalidName = (message: string) =>
+	new ReadFile.InvalidRequest({ issues: [{ message, path: ["name"] }] });
+
+const checkName = Schema.decodeUnknownEffect(ReadFile.Request.fields.name);
 
 // What the system said, as custom_cat's reason is: the errno's message.
-const ioFailed = (
-	name: string,
+const systemMessage = (
 	error: Pick<PlatformError.PlatformError, "message" | "reason">,
 ) => {
 	const cause = error.reason.cause;
 	const errno =
 		cause instanceof Error && "errno" in cause ? cause.errno : undefined;
-	return new IoFailed({
-		operation: "read",
-		file: name,
-		reason:
-			typeof errno === "number"
-				? getSystemErrorMessage(errno)
-				: error.message,
-	});
+	return typeof errno === "number"
+		? getSystemErrorMessage(errno)
+		: error.message;
 };
 
 export class BffReader extends Context.Service<
@@ -82,20 +66,29 @@ export class BffReader extends Context.Service<
 				const read = Effect.fn("BffReader.read")(function* (
 					name: string,
 				) {
-					if (path.extname(name) !== ".txt") {
-						return yield* invalidName("NotTxtFile", name);
-					}
+					yield* checkName(name).pipe(
+						Effect.mapError(({ message }) => invalidName(message)),
+					);
 					const file = path.join(directory, name);
 					if (yield* leavesFiles(file)) {
-						return yield* invalidName("LeavesFiles", name);
+						return yield* invalidName(
+							`"${name}" is a link, which could lead outside the files directory`,
+						);
 					}
 					const contents = yield* fs.readFileString(file).pipe(
 						Effect.catchReason(
 							"PlatformError",
 							"NotFound",
-							() =>
-								Effect.fail(invalidName("FileNotFound", name)),
-							(_, error) => Effect.fail(ioFailed(name, error)),
+							(_, error) =>
+								Effect.fail(invalidName(systemMessage(error))),
+							(_, error) =>
+								Effect.fail(
+									new IoFailed({
+										operation: "read",
+										file: name,
+										reason: systemMessage(error),
+									}),
+								),
 						),
 					);
 					return { contents };

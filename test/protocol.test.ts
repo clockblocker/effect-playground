@@ -4,78 +4,99 @@ import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/protocol/emit.ts";
 import { normalize } from "../scripts/protocol/normalize.ts";
-import {
-	CustomCat,
-	fieldOf,
-	IoFailed,
-	IssueMessage,
-	ReadFile,
-} from "../src/shared/generated/protocol.ts";
+import { fieldOf } from "../src/shared/field-of.ts";
+import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
+import { ReadFile } from "../src/shared/read-file.ts";
 
 // The JSON forms both sides agree on.
 const wire = {
-	request: { name: "hello.txt" },
-	success: { contents: "Hello\n" },
+	request: { inputFile: "hello.txt", outputFile: "copy.txt" },
+	success: { bytesCopied: 6 },
 	invalidRequest: {
 		_tag: "InvalidRequest",
 		issues: [
-			{
-				message: '"config.json" is not a .txt file',
-				path: ["name"],
-			},
+			{ message: "Must not be the input file", path: ["outputFile"] },
 		],
 	},
 } as const;
 
+// Names that test each rule a name has: 5 to 25 characters, a plain name,
+// and .txt.
+const names = [
+	"hello.txt",
+	"..txt",
+	"..hello.txt",
+	"../hello.txt",
+	"dir\\hello.txt",
+	"config.json",
+	"x.md",
+	`${"a".repeat(21)}.txt`,
+	`${"a".repeat(22)}.txt`,
+];
+
 describe("generated protocol", () => {
 	test("structs decode and encode their wire form", () => {
 		expect(
-			Schema.decodeUnknownSync(ReadFile.Request)(wire.request),
+			Schema.decodeUnknownSync(CustomCat.Request)(wire.request),
 		).toEqual(wire.request);
-		expect(Schema.encodeSync(ReadFile.Success)(wire.success)).toEqual(
+		expect(Schema.encodeSync(CustomCat.Success)(wire.success)).toEqual(
 			wire.success,
 		);
 		expect(() =>
-			Schema.decodeUnknownSync(ReadFile.Request)({ name: 42 }),
+			Schema.decodeUnknownSync(CustomCat.Request)({
+				...wire.request,
+				inputFile: 42,
+			}),
 		).toThrow();
 	});
 
-	test("a name must be a plain name, in the C++ rule's words", () => {
+	test("a name must be a plain .txt file name, in Effect's own words", () => {
 		const accepts = Schema.is(CustomCat.Request.fields.outputFile);
-		expect(accepts("hello.txt")).toBe(true);
-		expect(accepts("..hello.txt")).toBe(true);
-		expect(accepts("../hello.txt")).toBe(false);
-		expect(accepts("dir\\hello.txt")).toBe(false);
-		expect(() =>
-			Schema.decodeUnknownSync(ReadFile.Request)({ name: "a/b.txt" }),
-		).toThrow(IssueMessage.NotPlainName());
-	});
-
-	test("a name must be 5 to 25 characters, in the C++ rules' words", () => {
-		const accepts = Schema.is(ReadFile.Request);
-		expect(accepts({ name: "a".repeat(4) })).toBe(false);
-		expect(accepts({ name: "a".repeat(5) })).toBe(true);
-		expect(accepts({ name: "a".repeat(25) })).toBe(true);
-		expect(accepts({ name: "a".repeat(26) })).toBe(false);
-		expect(() =>
-			Schema.decodeUnknownSync(ReadFile.Request)({ name: "x.md" }),
-		).toThrow("Must be at least 5 characters long");
+		expect(names.filter(accepts)).toEqual([
+			"hello.txt",
+			"..txt",
+			"..hello.txt",
+			`${"a".repeat(21)}.txt`,
+		]);
 		expect(() =>
 			Schema.decodeUnknownSync(CustomCat.Request)({
-				inputFile: "hello.txt",
-				outputFile: "a".repeat(26),
+				...wire.request,
+				inputFile: "a/b.txt",
 			}),
-		).toThrow("Must be at most 25 characters long");
+		).toThrow(
+			String.raw`Expected a string matching the RegExp ^(?!\.\.?$)[^/\\]*$`,
+		);
+		expect(() =>
+			Schema.decodeUnknownSync(CustomCat.Request)({
+				...wire.request,
+				outputFile: "config.json",
+			}),
+		).toThrow(String.raw`Expected a string matching the RegExp ^.+\.txt$`);
+		expect(() =>
+			Schema.decodeUnknownSync(CustomCat.Request)({
+				...wire.request,
+				inputFile: "x.md",
+			}),
+		).toThrow("Expected a string with at least 5 code points");
+	});
+
+	test("RequestShape is the request without its rules", () => {
+		const accepts = Schema.is(CustomCat.RequestShape);
+		expect(accepts({ inputFile: "x.md", outputFile: "../x.json" })).toBe(
+			true,
+		);
+		expect(accepts({ inputFile: "hello.txt" })).toBe(false);
+		expect(accepts({ inputFile: 42, outputFile: "copy.txt" })).toBe(false);
 	});
 
 	test("an InvalidRequest decodes into its class and encodes back", () => {
-		const decode = Schema.decodeUnknownSync(ReadFile.Failure);
+		const decode = Schema.decodeUnknownSync(CustomCat.Failure);
 		const invalid = decode(wire.invalidRequest);
-		expect(invalid).toBeInstanceOf(ReadFile.InvalidRequest);
+		expect(invalid).toBeInstanceOf(CustomCat.InvalidRequest);
 		expect(
 			invalid._tag === "InvalidRequest" && invalid.issues[0].path,
-		).toEqual(["name"]);
-		expect(Schema.encodeSync(ReadFile.Failure)(invalid)).toEqual(
+		).toEqual(["outputFile"]);
+		expect(Schema.encodeSync(CustomCat.Failure)(invalid)).toEqual(
 			wire.invalidRequest,
 		);
 		expect(() => decode({ ...wire.invalidRequest, issues: [] })).toThrow();
@@ -115,31 +136,23 @@ describe("generated protocol", () => {
 		expect(accepts(["name"])).toBe(false);
 		expect(accepts(["inputFile", 0])).toBe(false);
 		expect(accepts([])).toBe(true);
-		expect(Schema.is(ReadFile.Path)(["name"])).toBe(true);
-		expect(Schema.is(ReadFile.Path)(["inputFile"])).toBe(false);
 	});
 
 	test("its message joins the issues' messages, and none of it is sent", () => {
 		const invalid = new CustomCat.InvalidRequest({
 			issues: [
-				{
-					message: IssueMessage.NotTxtFile({ value: "a.json" }),
-					path: ["inputFile"],
-				},
-				{
-					message: IssueMessage.Missing(),
-					path: ["outputFile"],
-				},
+				{ message: "No such file or directory", path: ["inputFile"] },
+				{ message: "Required", path: ["outputFile"] },
 			],
 		});
-		expect(invalid.message).toBe('"a.json" is not a .txt file; Required');
+		expect(invalid.message).toBe("No such file or directory; Required");
 		expect(String(invalid)).toStartWith("InvalidRequest: ");
 		expect(
 			Object.keys(Schema.encodeSync(CustomCat.InvalidRequest)(invalid)),
 		).toEqual(["_tag", "issues"]);
 	});
 
-	test("an issue is just a message and a path, each rule's template in IssueMessage", async () => {
+	test("an issue is just a message and a path, and the schema has no templates for it", async () => {
 		const schema = await Bun.file(
 			new URL("../cpp/protocol.schema.json", import.meta.url),
 		).json();
@@ -147,29 +160,7 @@ describe("generated protocol", () => {
 			"message",
 			"path",
 		]);
-		expect(Object.keys(IssueMessage)).toEqual(
-			Object.keys(schema["x-issues"]),
-		);
-		expect(Object.keys(IssueMessage)).toEqual([
-			"Missing",
-			"TooShort",
-			"TooLong",
-			"NotPlainName",
-			"NotTxtFile",
-			"LeavesFiles",
-			"FileNotFound",
-			"SameAsInput",
-			"SameFileAsInput",
-		]);
-	});
-
-	test("each rule's message is its C++ template, filled in", () => {
-		expect(IssueMessage.TooShort({ limit: 5 })).toBe(
-			"Must be at least 5 characters long",
-		);
-		expect(IssueMessage.FileNotFound({ value: "missing.txt" })).toBe(
-			'"missing.txt" does not exist',
-		);
+		expect(Object.keys(schema)).not.toContain("x-issues");
 	});
 
 	test("fieldOf names a path the way react-hook-form does", () => {
@@ -180,9 +171,9 @@ describe("generated protocol", () => {
 	test("an InvalidRequest can be raised and caught by tag", async () => {
 		const caught = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* Schema.decodeUnknownSync(ReadFile.InvalidRequest)(
-					wire.invalidRequest,
-				);
+				return yield* Schema.decodeUnknownSync(
+					CustomCat.InvalidRequest,
+				)(wire.invalidRequest);
 			}).pipe(
 				Effect.catchTags({
 					InvalidRequest: ({ issues }) => Effect.succeed(issues),
@@ -190,6 +181,21 @@ describe("generated protocol", () => {
 			),
 		);
 		expect(caught).toEqual(wire.invalidRequest.issues);
+	});
+});
+
+describe("ReadFile", () => {
+	test("a name has the rules a copy's names have", () => {
+		expect(names.filter(Schema.is(ReadFile.Request.fields.name))).toEqual(
+			names.filter(Schema.is(CustomCat.Request.fields.inputFile)),
+		);
+		expect(Schema.is(ReadFile.RequestShape)({ name: "x.md" })).toBe(true);
+	});
+
+	test("an issue's path is its one field, or the whole request", () => {
+		expect(Schema.is(ReadFile.Path)(["name"])).toBe(true);
+		expect(Schema.is(ReadFile.Path)([])).toBe(true);
+		expect(Schema.is(ReadFile.Path)(["inputFile"])).toBe(false);
 	});
 });
 
@@ -236,7 +242,7 @@ function fixture() {
 			a__b__Pair: {
 				type: "object",
 				properties: {
-					input: { type: "string" },
+					input: { type: "string", minLength: 3 },
 					output: { type: "string" },
 				},
 				required: ["input", "output"],
@@ -280,13 +286,6 @@ function fixture() {
 				},
 				required: ["_tag", "issues"],
 			},
-		} as Record<string, Record<string, unknown>>,
-		"x-issues": {
-			Missing: { message: "Required" },
-			TooShort: { message: "At least {limit}", keyword: "minLength" },
-			Lowercase: { message: "Lowercase only", keyword: "pattern" },
-			// Backticks, $ and \ are literal text in the generated function.
-			Odd: { message: "`{value}` is odd; $ and \\ stay" },
 		} as Record<string, Record<string, unknown>>,
 		"x-errors": {
 			Busy: { message: "{what} is busy for {seconds}s" },
@@ -367,72 +366,33 @@ describe("emitter", () => {
 		).toThrow();
 	});
 
-	test("writes each rule's template as a function of its placeholders", async () => {
-		const { IssueMessage, fieldOf } = await load(fixture());
-		expect(Object.keys(IssueMessage)).toEqual([
-			"Missing",
-			"TooShort",
-			"Lowercase",
-			"Odd",
-		]);
-		expect(IssueMessage.Missing()).toBe("Required");
-		expect(IssueMessage.TooShort({ limit: 2 })).toBe("At least 2");
-		expect(IssueMessage.Odd({ value: "x" })).toBe(
-			"`x` is odd; $ and \\ stay",
+	test("leaves each check Effect's own message", async () => {
+		expect(emitted(fixture())).not.toContain("{ message:");
+		const { Get } = await load(fixture());
+		const decode = Schema.decodeUnknownSync(Get.Request);
+		expect(() => decode({ files: [], label: "a" })).toThrow(
+			"Expected a string with at least 2 code points",
 		);
-		expect(fieldOf(["files", 2, "input"])).toBe("files.2.input");
+		expect(() => decode({ files: [], label: "AB" })).toThrow(
+			"Expected a string matching the RegExp ^[a-z]*$",
+		);
 	});
 
-	test("gives a length bound the message of the rule that carries it", async () => {
+	test("writes RequestShape, the request without its checks, nested structs inlined", async () => {
 		expect(emitted(fixture())).toContain(
-			"Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }) })",
+			"export const RequestShape = Schema.Struct({",
 		);
 		const { Get } = await load(fixture());
-		expect(() =>
-			Schema.decodeUnknownSync(Get.Request)({ files: [], label: "a" }),
-		).toThrow("At least 2");
-	});
-
-	test("gives a pattern the message of the rule that carries it", async () => {
-		expect(emitted(fixture())).toContain(
-			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase() })',
-		);
-		const { Get } = await load(fixture());
-		expect(() =>
-			Schema.decodeUnknownSync(Get.Request)({ files: [], label: "AB" }),
-		).toThrow("Lowercase only");
-	});
-
-	test("rejects two rules that carry one keyword, or a keyword rule that names the value", () => {
-		const document = fixture();
-		document["x-issues"].Odd = { message: "odd", keyword: "pattern" };
-		expect(() => normalize(document)).toThrow(
-			"Lowercase and Odd both carry pattern",
-		);
-		document["x-issues"].Odd = { message: "{value}", keyword: "maxLength" };
-		expect(() => normalize(document)).toThrow(
-			"Odd's message names {value}, but only {limit} can be filled in",
-		);
-	});
-
-	test("rejects a bound no rule carries", () => {
-		const document = fixture();
-		delete document["x-issues"].TooShort?.keyword;
-		expect(() => emitted(document)).toThrow(
-			/\{limit\}, but only \{value\} can be filled in/,
-		);
-		document["x-issues"].TooShort = { message: "short" };
-		expect(() => emitted(document)).toThrow(
-			"A field has a minLength, but no rule carries one",
-		);
-	});
-
-	test("rejects a template with an unknown placeholder", () => {
-		const document = fixture();
-		document["x-issues"].Odd = { message: "{value} or {name}" };
-		expect(() => normalize(document)).toThrow(
-			"Odd's message names {name}, but only {value} can be filled in",
-		);
+		const request = { files: [{ input: "x", output: "y" }], label: "AB" };
+		expect(Schema.is(Get.Request)(request)).toBe(false);
+		expect(Schema.is(Get.RequestShape)(request)).toBe(true);
+		expect(
+			Schema.is(Get.RequestShape)({
+				files: [{ input: 1, output: "y" }],
+				label: "AB",
+			}),
+		).toBe(false);
+		expect(Schema.is(Get.RequestShape)({ files: [] })).toBe(false);
 	});
 
 	test("rejects an Issue with more than a message and a path", () => {

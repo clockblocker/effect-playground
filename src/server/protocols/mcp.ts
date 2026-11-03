@@ -1,8 +1,9 @@
 import { Effect, Layer, Schema } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
-import { CliFailed } from "../shared/cli-failed.ts";
-import { CustomCat, fieldOf } from "../shared/generated/protocol.ts";
-import { CustomCatCli } from "./custom-cat.ts";
+import { CliFailed } from "../../shared/cli-failed.ts";
+import { fieldOf } from "../../shared/field-of.ts";
+import { CustomCat } from "../../shared/generated/protocol.ts";
+import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 
 // McpServer makes a failure's message the tool error's text, and an MCP
 // client has no form to put each issue under, so its text names each field.
@@ -19,7 +20,8 @@ const CustomCatTool = Tool.make("custom_cat", {
 	description:
 		"Copies a .txt file in the files directory to another .txt file there, " +
 		"replacing it if it exists.",
-	parameters: CustomCat.Request,
+	// By shape alone: custom_cat checks the rules.
+	parameters: CustomCat.RequestShape,
 	success: CustomCat.Success,
 	failure: Schema.Union([CustomCat.Failure, CliFailed]),
 });

@@ -8,22 +8,35 @@ output file, and `custom_cat` copies one to the other. Files live in
 
 A request whose fields are wrong fails with `InvalidRequest`, which lists
 every problem as an **issue**: `{ message, path }`, a Standard Schema
-issue. Each comes from a rule, named for what it reports:
+issue. The rules:
 
-- `Missing`: the field is absent.
-- `TooShort`, `TooLong`: a name must be 5 to 25 characters long.
-- `NotPlainName`: a name is a file name, not a path: no `/` or `\`, and not
-  `.` or `..`.
-- `NotTxtFile`: a name must end in `.txt`.
-- `LeavesFiles`: the name is a link in `files/`. No link is followed, even
-  one that stays in `files/`, and neither is a name that resolves outside it.
-- `FileNotFound`: the file to read or copy doesn't exist.
-- `SameAsInput`: the output names the input.
-- `SameFileAsInput`: the output is the input under another name, a hard
-  link.
+- every field is present;
+- a name is 5 to 25 characters long;
+- a name is a plain file name, not a path: no `/` or `\`, and not `.` or
+  `..`;
+- a name ends in `.txt`;
+- a name isn't a link in `files/`. No link is followed, even one that stays
+  in `files/`, and neither is a name that resolves outside it;
+- the file to read or copy exists;
+- a copy's output isn't its input, by name or through a hard link.
 
-The rules, and each rule's message, live on C++ types, and everything else
-gets them from the generated schema (see below).
+An issue's `message` is whatever checked the rule says, as it says it: a
+reflect-cpp validator's error in `custom_cat`, Effect Schema's message in
+the page and the BFF, or the system's error for a file that doesn't exist.
+Where nothing says anything, the check has a plain literal. There are no
+message templates and no rule codes.
+
+Who checks the rules depends on the method:
+
+- `CustomCat`'s rules live on C++ types, in `cpp/include/protocol.hpp`. The
+  page's form checks them with the TypeScript schema generated from them
+  (see below), so it shows Effect's own messages and sends nothing that
+  breaks one. The BFF checks a copy's shape only and leaves the rules to
+  `custom_cat`, so every issue a copy comes back with is `custom_cat`'s,
+  word for word.
+- `ReadFile` is the BFF's own, with no C++ step: its schema is written in
+  TypeScript, in `src/shared/read-file.ts`, and `BffReader` checks the name
+  with it, then the files.
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
 RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
@@ -68,8 +81,8 @@ How each surfaces:
 
 | Bucket | RPC (the page) | REST | MCP |
 |---|---|---|---|
-| Shape | the form shows the issue and sends nothing; a raw request gets a `Die` | 422, the `InvalidRequest` as JSON | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
-| Rule, Precondition | `InvalidRequest`: each issue under its field | 422, the `InvalidRequest` as JSON | a tool error, a line per issue: `outputFile: Must not be the input file` |
+| Shape | a raw request gets a `Die` | 422, the `InvalidRequest` as JSON | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
+| Rule, Precondition | `InvalidRequest`: each issue under its field; the form shows a rule's issue in Effect's words and sends nothing | 422, the `InvalidRequest` as JSON | a tool error, a line per issue: `outputFile: Must not be the input file` |
 | Dependency | the error's `message` as the root message | `IoFailed` 500, `CliFailed` 503, as JSON | a tool error whose text is the `message` |
 | Transport | `Request failed: ` and its cause, such as `Transport error (POST …/rpc/)` | | |
 | Contract, Defect | `Something went wrong.` | an empty 500 | `Tool execution failed due to an internal server error.` |
@@ -82,19 +95,24 @@ McpServer their own.
 Shape is a `Die` on RPC because `RpcServer` decodes the payload before any
 handler or middleware runs, and a payload that doesn't decode becomes a
 defect with the schema's message, with no hook to turn it into a typed
-error. The ways around it, a payload schema of `Schema.Unknown` or one
-without checks, decoded in the handler, would lose the typed payload the
-client encodes with. The page's client encodes the payload with the same
-schema before sending, and its forms check it first, so only a raw request
-meets it. HttpApi has the hook: `HttpApiMiddleware.layerSchemaErrorTransform`.
-A middleware on each endpoint turns every request that doesn't decode, of
-the wrong shape or against a rule the schema carries (`TooShort`, `TooLong`,
-`NotPlainName`), into the method's `InvalidRequest`, its issues from
-`SchemaIssue.makeFormatterStandardSchemaV1`: `{"inputFile": 42}` is
-`Expected string` on `["inputFile"]` and `Required` on `["outputFile"]`. An
-issue off the method's fields goes on `[]`, the whole request, its message
-saying where: an unknown field is `verbose: Unknown field`, and a body that
-isn't an object `Expected object`. No form or MCP client meets `[]`.
+error. So each method's payload schema is its `RequestShape`, the request's
+fields with their types and no rules: a payload that breaks a rule decodes,
+and the handler answers it with the method's `InvalidRequest`, `custom_cat`'s
+for a copy and `BffReader`'s for a read. Only a payload of the wrong shape
+dies, which the page's client never sends, since it encodes the payload
+with the same schema. The REST body and the MCP tool's parameters are
+`RequestShape`s too.
+
+HttpApi has the hook: `HttpApiMiddleware.layerSchemaErrorTransform`. A
+middleware on the copy endpoint turns a body that doesn't decode into
+`CustomCat.InvalidRequest`, its issues from
+`SchemaIssue.makeFormatterStandardSchemaV1` as they come:
+`{"inputFile": 42}` is `Expected string` on `["inputFile"]` and
+`Missing key` on `["outputFile"]`. An issue off the method's fields goes on
+`[]`, the whole request, its message saying where: an unknown field is
+`verbose: Expected no excess property`, and a body that isn't an object
+`Expected object`. No form or MCP client meets `[]`. The read endpoint's
+`:name` is any string, so it needs no middleware.
 
 ## Prerequisites
 
@@ -132,12 +150,12 @@ What each transport serves:
   `client.files.read({ params: { name } })` and
   `client.files.copy({ payload })`. An `InvalidRequest` is a 422 whose body
   is its JSON, such as
-  `{"_tag":"InvalidRequest","issues":[{"message":"\"config.json\" is not a .txt file","path":["name"]}]}`.
+  `{"_tag":"InvalidRequest","issues":[{"message":"Expected a string matching the RegExp ^.+\\.txt$","path":["name"]}]}`.
 - MCP, for MCP clients: the `custom_cat` tool, over Streamable HTTP at
   `/mcp`, protocol 2025-11-25 or 2025-06-18. Its parameters are
   `CustomCat.Request`; an `InvalidRequest` comes back as a tool error whose
   text has a line per issue, its field first:
-  `inputFile: "config.json" is not a .txt file`.
+  `inputFile: String 'config.json' did not match format '.txt file name': '^.+\.txt$'.`
 
 For example, after `initialize` (whose response carries `mcp-session-id`)
 and `notifications/initialized`:
@@ -173,7 +191,7 @@ rules, and only the input must exist. What it prints, and its exit codes:
 - 0, copied: stdout is `{"bytesCopied":18}`.
 - 1, a field is wrong, or missing: stdout is the `InvalidRequest`, with
   every issue, such as
-  `{"_tag":"InvalidRequest","issues":[{"message":"\"config.json\" is not a .txt file","path":["inputFile"]},{"message":"\"x.json\" is not a .txt file","path":["outputFile"]}]}`.
+  `{"_tag":"InvalidRequest","issues":[{"message":"String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["inputFile"]},{"message":"String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["outputFile"]}]}`.
 - 2, a usage error that names no field, such as an unknown flag:
   reflect-cpp's error, on stderr.
 - 3, a file couldn't be read or written: stdout is the `IoFailed`, such as

@@ -1,11 +1,11 @@
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
-import { BffReader } from "./bff-reader.ts";
-import { CustomCatCli } from "./custom-cat.ts";
-import { McpRoutes } from "./mcp.ts";
-import { RestRoutes } from "./rest.ts";
-import { RpcRoutes } from "./rpc.ts";
+import { BffReader } from "./bun-side/bff-reader.ts";
+import { CustomCatCli } from "./cpp-side/custom-cat.ts";
+import { McpRoutes } from "./protocols/mcp.ts";
+import { RestRoutes } from "./protocols/rest.ts";
+import { RpcRoutes } from "./protocols/rpc.ts";
 
 const Routes = Layer.mergeAll(RestRoutes, RpcRoutes, McpRoutes).pipe(
 	Layer.provide([BffReader.layer, CustomCatCli.layer]),

@@ -14,7 +14,7 @@ import {
 	Result,
 } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
-import { ContractMismatch, CustomCatCli } from "../src/server/custom-cat.ts";
+import { ContractMismatch, CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { CliFailed } from "../src/shared/cli-failed.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 
@@ -103,11 +103,12 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 				new CustomCat.InvalidRequest({
 					issues: [
 						{
-							message: '"missing.txt" does not exist',
+							message: "No such file or directory",
 							path: ["inputFile"],
 						},
 						{
-							message: '"copy.json" is not a .txt file',
+							message:
+								"String 'copy.json' did not match format '.txt file name': '^.+\\.txt$'.",
 							path: ["outputFile"],
 						},
 					],

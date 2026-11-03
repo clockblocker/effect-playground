@@ -2,47 +2,12 @@
 // reflect-cpp emits from the structs in cpp/include/protocol.hpp.
 // Don't edit: change the C++ structs and run `bun run generate`.
 //
-// A namespace per method makes `ReadFile.Success` both the schema and its
-// type, and TypeScript 7 hovers read `ReadFile.Success`. Namespaces are
+// A namespace per method makes `CustomCat.Success` both the schema and its
+// type, and TypeScript 7 hovers read `CustomCat.Success`. Namespaces are
 // TypeScript-only syntax that emits code, which Bun and Vite both compile.
 // What more than one method uses is declared once, before the namespaces.
 
 import { Schema } from "effect";
-
-/** Each rule's message, from its C++ template, by the rule's name. */
-export const IssueMessage = {
-	Missing: () => "Required",
-	TooShort: ({ limit }: { readonly limit: number }) =>
-		`Must be at least ${limit} characters long`,
-	TooLong: ({ limit }: { readonly limit: number }) =>
-		`Must be at most ${limit} characters long`,
-	NotPlainName: () => "Must be a file name, not a path",
-	NotTxtFile: ({ value }: { readonly value: string }) =>
-		`"${value}" is not a .txt file`,
-	LeavesFiles: ({ value }: { readonly value: string }) =>
-		`"${value}" is a link, which could lead outside the files directory`,
-	FileNotFound: ({ value }: { readonly value: string }) =>
-		`"${value}" does not exist`,
-	SameAsInput: () => "Must not be the input file",
-	SameFileAsInput: ({ value }: { readonly value: string }) =>
-		`"${value}" is the input file under another name`,
-} as const;
-
-type Segments = ReadonlyArray<string | number>;
-
-/** The react-hook-form name of the field at a path: `["files", 2, "input"]` → `"files.2.input"`. */
-export type FieldOf<P extends Segments> = P extends readonly [
-	infer Head extends string | number,
-	...infer Rest extends Segments,
-]
-	? Rest extends readonly []
-		? `${Head}`
-		: `${Head}.${FieldOf<Rest>}`
-	: never;
-
-/** The react-hook-form name of the field an issue's path points at. */
-export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
-	path.join(".") as FieldOf<P>;
 
 /**
  * An error that isn't about a field. Its message: Couldn't {operation}
@@ -61,83 +26,24 @@ export class IoFailed extends Schema.TaggedError<IoFailed>()("IoFailed", {
 	}
 }
 
-/** What the ReadFile method takes, succeeds with and fails with. */
-export namespace ReadFile {
-	/** What ReadFile takes. */
-	export const Request = Schema.Struct({
-		/** The file to read, such as "hello.txt", in the files directory. */
-		name: Schema.String.check(
-			Schema.isMinCodePoints(5, {
-				message: IssueMessage.TooShort({ limit: 5 }),
-			}),
-			Schema.isMaxCodePoints(25, {
-				message: IssueMessage.TooLong({ limit: 25 }),
-			}),
-			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
-				message: IssueMessage.NotPlainName(),
-			}),
-		),
-	});
-	export interface Request extends Schema.Schema.Type<typeof Request> {}
-
-	/** What ReadFile succeeds with. */
-	export const Success = Schema.Struct({
-		/** The whole file, decoded as UTF-8. */
-		contents: Schema.String,
-	});
-	export interface Success extends Schema.Schema.Type<typeof Success> {}
-
-	/** Where in a ReadFile request an issue is: a field, or [] for the whole request. */
-	export const Path = Schema.Union([
-		Schema.Tuple([Schema.Literal("name")]),
-		Schema.Tuple([]),
-	]);
-	export type Path = typeof Path.Type;
-
-	/** A problem with a ReadFile request. */
-	export const Issue = Schema.Struct({
-		/** What is wrong, in a sentence. */
-		message: Schema.String,
-		/**
-		 * Where in the request the problem is: a field, such as ["files", 2,
-		 * "input"], or [] for the request as a whole.
-		 */
-		path: Path,
-	});
-	export interface Issue extends Schema.Schema.Type<typeof Issue> {}
-
-	/** What is wrong with a ReadFile request's fields. */
-	export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()(
-		"InvalidRequest",
-		{
-			/** Every problem with the request's fields, one per failed rule. */
-			issues: Schema.NonEmptyArray(Issue),
-		},
-	) {
-		override get message(): string {
-			return this.issues.map((issue) => issue.message).join("; ");
-		}
-	}
-
-	/** What ReadFile fails with. */
-	export const Failure = Schema.Union([InvalidRequest, IoFailed]);
-	export type Failure = InvalidRequest | IoFailed;
-}
-
 /** What the CustomCat method takes, succeeds with and fails with. */
 export namespace CustomCat {
 	/** What CustomCat takes. */
 	export const Request = Schema.Struct({
 		/** The file to copy, such as "hello.txt", in the files directory. */
 		inputFile: Schema.String.check(
-			Schema.isMinCodePoints(5, {
-				message: IssueMessage.TooShort({ limit: 5 }),
+			Schema.isMinCodePoints(5).annotate({
+				expected: "a string with at least 5 code points",
 			}),
-			Schema.isMaxCodePoints(25, {
-				message: IssueMessage.TooLong({ limit: 25 }),
+			Schema.isMaxCodePoints(25).annotate({
+				expected: "a string with at most 25 code points",
 			}),
-			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
-				message: IssueMessage.NotPlainName(),
+			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u).annotate({
+				expected:
+					"a string matching the RegExp ^(?!\\.\\.?$)[^/\\\\]*$",
+			}),
+			Schema.isPattern(/^.+\.txt$/u).annotate({
+				expected: "a string matching the RegExp ^.+\\.txt$",
 			}),
 		),
 		/**
@@ -145,14 +51,18 @@ export namespace CustomCat {
 		 * it exists.
 		 */
 		outputFile: Schema.String.check(
-			Schema.isMinCodePoints(5, {
-				message: IssueMessage.TooShort({ limit: 5 }),
+			Schema.isMinCodePoints(5).annotate({
+				expected: "a string with at least 5 code points",
 			}),
-			Schema.isMaxCodePoints(25, {
-				message: IssueMessage.TooLong({ limit: 25 }),
+			Schema.isMaxCodePoints(25).annotate({
+				expected: "a string with at most 25 code points",
 			}),
-			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
-				message: IssueMessage.NotPlainName(),
+			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u).annotate({
+				expected:
+					"a string matching the RegExp ^(?!\\.\\.?$)[^/\\\\]*$",
+			}),
+			Schema.isPattern(/^.+\.txt$/u).annotate({
+				expected: "a string matching the RegExp ^.+\\.txt$",
 			}),
 		),
 	});
@@ -164,6 +74,19 @@ export namespace CustomCat {
 		bytesCopied: Schema.Int,
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
+
+	/** What CustomCat takes, its fields' types without their rules. */
+	export const RequestShape = Schema.Struct({
+		/** The file to copy, such as "hello.txt", in the files directory. */
+		inputFile: Schema.String,
+		/**
+		 * The file to write the copy to, in the files directory, replacing it if
+		 * it exists.
+		 */
+		outputFile: Schema.String,
+	});
+	export interface RequestShape
+		extends Schema.Schema.Type<typeof RequestShape> {}
 
 	/** Where in a CustomCat request an issue is: a field, or [] for the whole request. */
 	export const Path = Schema.Union([

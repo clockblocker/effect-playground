@@ -10,8 +10,8 @@ import {
 	Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { CliFailed } from "../shared/cli-failed.ts";
-import { CustomCat, IoFailed } from "../shared/generated/protocol.ts";
+import { CliFailed } from "../../shared/cli-failed.ts";
+import { CustomCat, IoFailed } from "../../shared/generated/protocol.ts";
 
 const root = join(import.meta.dirname, "../..");
 

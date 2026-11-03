@@ -1,9 +1,6 @@
 // protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
-// emits, plus "x-issues": each rule's message template, by its name, and for
-// a rule with a Schema, the keyword that carries its limit, such as
-// "minLength";
-// and "x-errors": the message template of each error that has one, by tag.
-// reflect-cpp only describes fields, and the rules live on types.
+// emits, plus "x-errors": the message template of each error that has one,
+// by tag, which reflect-cpp doesn't describe.
 
 #include <iostream>
 #include <rfl.hpp>
@@ -14,7 +11,6 @@
 #include <type_traits>
 
 #include "protocol.hpp"
-#include "validate.hpp"
 
 namespace {
 
@@ -26,47 +22,6 @@ Generic::Object& object(Generic& value, std::string_view what) {
 		throw std::runtime_error(std::string(what) + " is not an object");
 	}
 	return *result;
-}
-
-// The one keyword besides "type" in the schema of a string with just this
-// rule's constraint: {"type":"string","minLength":5} → "minLength".
-template <class Rule>
-std::string keyword() {
-	auto schema =
-		rfl::json::read<Generic>(
-			rfl::json::to_schema<rfl::Validator<std::string, typename Rule::Schema>>())
-			.value();
-	std::string found;
-	for (const auto& [key, _] : object(schema, "a rule's schema")) {
-		if (key == "$schema" || key == "$defs" || key == "type") continue;
-		if (!found.empty()) throw std::runtime_error("two keywords: " + key);
-		found = key;
-	}
-	if (found.empty()) throw std::runtime_error("a rule's Schema has no keyword");
-	return found;
-}
-
-// In order of first use.
-template <class Request>
-void add_templates(Generic::Object& templates) {
-	validate::for_each_rule<Request>([&]<class Rule>() {
-		const auto name = std::string(Rule::name);
-		Generic::Object entry;
-		entry["message"] = std::string(Rule::message);
-		if constexpr (checked::HasSchema<Rule>) entry["keyword"] = keyword<Rule>();
-		if (templates.count(name) == 0) {
-			templates[name] = entry;
-		} else if (rfl::json::write(templates[name]) != rfl::json::write(entry)) {
-			throw std::runtime_error(name + " has two message templates");
-		}
-	});
-}
-
-template <class... Procedures>
-Generic::Object issues(std::type_identity<std::tuple<Procedures...>>) {
-	Generic::Object templates;
-	(add_templates<decltype(Procedures::payload)>(templates), ...);
-	return templates;
 }
 
 template <class Error>
@@ -98,8 +53,6 @@ int main() {
 	auto document = rfl::json::read<Generic>(
 						rfl::json::to_schema<Procedures, protocol::Wire>())
 						.value();
-	object(document, "the schema")["x-issues"] =
-		issues(std::type_identity<Procedures>());
 	object(document, "the schema")["x-errors"] =
 		errors(std::type_identity<Procedures>());
 	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";

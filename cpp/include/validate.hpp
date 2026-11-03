@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <rfl.hpp>
 #include <string>
-#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -23,51 +22,13 @@ struct is_vector : std::false_type {};
 template <class T>
 struct is_vector<std::vector<T>> : std::true_type {};
 
-template <class Rule>
-std::string limit() {
-	if constexpr (requires { Rule::limit; }) {
-		return std::to_string(Rule::limit);
-	} else {
-		return "{limit}";
-	}
-}
-
-// `{value}` is the field's value, `{limit}` the rule's limit. An unknown
-// placeholder stays as written; the generator rejects it first.
-template <class Rule>
-std::string fill(const std::string& value) {
-	std::string message;
-	std::string_view rest = Rule::message;
-	while (true) {
-		const auto open = rest.find('{');
-		const auto close = rest.find('}', open);
-		if (open == std::string_view::npos || close == std::string_view::npos) {
-			return message + std::string(rest);
-		}
-		message += rest.substr(0, open);
-		const auto placeholder = rest.substr(open, close - open + 1);
-		if (placeholder == "{value}") {
-			message += value;
-		} else if (placeholder == "{limit}") {
-			message += limit<Rule>();
-		} else {
-			message += placeholder;
-		}
-		rest = rest.substr(close + 1);
-	}
-}
-
-template <class Rule>
-Issue issue(const std::string& value, const std::vector<PathSegment>& path) {
-	return Issue{.message = fill<Rule>(value), .path = path};
-}
-
-// Runs a Checked's rules, its base's first, and adds an issue per failed
-// rule. Returns whether all of them passed.
-template <class Base, class... Rules>
-bool check(std::type_identity<Checked<Base, Rules...>>,
-		   const std::string& value, const std::vector<PathSegment>& path,
-		   std::vector<Issue>& issues) {
+// Runs a Checked's validators, its base's first, and adds an issue per
+// failed validator, its message the validator's own. Returns whether all of
+// them passed.
+template <class Base, class... Validators>
+bool check(std::type_identity<Checked<Base, Validators...>>,
+		   const checked::raw_t<Base>& value,
+		   const std::vector<PathSegment>& path, std::vector<Issue>& issues) {
 	if constexpr (checked::is_checked_v<Base>) {
 		if (!check(std::type_identity<Base>(), value, path, issues)) {
 			return false;
@@ -76,8 +37,9 @@ bool check(std::type_identity<Checked<Base, Rules...>>,
 	bool passed = true;
 	(
 		[&] {
-			if (Rules::passes(value)) return;
-			issues.push_back(issue<Rules>(value, path));
+			const auto result = Validators::validate(value);
+			if (result) return;
+			issues.push_back(Issue{.message = result.error().what(), .path = path});
 			passed = false;
 		}(),
 		...);
@@ -85,20 +47,11 @@ bool check(std::type_identity<Checked<Base, Rules...>>,
 }
 
 // A struct's rules across its fields: `using Rules = std::tuple<…>`. A rule
-// has a `name`, a `message`, `static bool passes(const Struct&)`, and in
-// `field` a pointer to the member its issue goes on, whose value fills
-// `{value}`.
+// is a reflect-cpp validator of the struct, `static rfl::Result<T>
+// validate(const T&)`, and in `field` a pointer to the member its issue goes
+// on.
 template <class T>
 concept HasRules = requires { typename T::Rules; };
-
-template <class T>
-const auto& raw_value(const T& field) {
-	if constexpr (rfl::internal::is_description_v<T>) {
-		return raw_value(field.get());
-	} else {
-		return field.value();
-	}
-}
 
 // The wire name of the member `member` points into `value`.
 template <class T>
@@ -121,10 +74,10 @@ void check_rules(std::type_identity<std::tuple<Rules...>>, const T& value,
 				 std::vector<PathSegment>& path, std::vector<Issue>& issues) {
 	(
 		[&] {
-			if (Rules::passes(value)) return true;
-			const auto& member = value.*Rules::field;
-			path.emplace_back(wire_name(value, &member));
-			issues.push_back(issue<Rules>(raw_value(member), path));
+			const auto result = Rules::validate(value);
+			if (result) return true;
+			path.emplace_back(wire_name(value, &(value.*Rules::field)));
+			issues.push_back(Issue{.message = result.error().what(), .path = path});
 			path.pop_back();
 			return false;
 		}() &&
@@ -141,7 +94,7 @@ void walk(const T& value, std::vector<PathSegment>& path,
 		walk(value.get(), path, issues);
 	} else if constexpr (checked::is_checked_v<T>) {
 		if (value.missing()) {
-			issues.push_back(issue<protocol::Present>("", path));
+			issues.push_back(Issue{.message = "Required", .path = path});
 		} else {
 			check(std::type_identity<T>(), value.value(), path, issues);
 		}
@@ -175,46 +128,6 @@ std::vector<Issue> validate(const Request& request) {
 	std::vector<Issue> issues;
 	walk(request, path, issues);
 	return issues;
-}
-
-// Calls `visit.template operator()<Rule>()` for each rule a request's type
-// can apply, Present included, with repeats.
-template <class T, class Visit>
-void for_each_rule(const Visit& visit);
-
-template <class Base, class... Rules, class Visit>
-void for_each_checked_rule(std::type_identity<Checked<Base, Rules...>>,
-						   const Visit& visit) {
-	if constexpr (checked::is_checked_v<Base>) for_each_rule<Base>(visit);
-	(visit.template operator()<Rules>(), ...);
-}
-
-template <class... Rules, class Visit>
-void for_each_struct_rule(std::type_identity<std::tuple<Rules...>>,
-						  const Visit& visit) {
-	(visit.template operator()<Rules>(), ...);
-}
-
-template <class T, class Visit>
-void for_each_rule(const Visit& visit) {
-	if constexpr (rfl::internal::is_description_v<T>) {
-		for_each_rule<typename T::Type>(visit);
-	} else if constexpr (checked::is_checked_v<T>) {
-		visit.template operator()<protocol::Present>();
-		for_each_checked_rule(std::type_identity<T>(), visit);
-	} else if constexpr (is_vector<T>::value) {
-		for_each_rule<typename T::value_type>(visit);
-	} else if constexpr (std::is_class_v<T> && std::is_aggregate_v<T>) {
-		using Fields = typename rfl::named_tuple_t<T>::Fields;
-		[&]<std::size_t... index>(std::index_sequence<index...>) {
-			(for_each_rule<std::remove_cvref_t<
-				 typename rfl::tuple_element_t<index, Fields>::Type>>(visit),
-			 ...);
-		}(std::make_index_sequence<rfl::tuple_size_v<Fields>>());
-		if constexpr (HasRules<T>) {
-			for_each_struct_rule(std::type_identity<typename T::Rules>(), visit);
-		}
-	}
 }
 
 }  // namespace validate

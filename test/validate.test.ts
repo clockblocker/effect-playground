@@ -3,11 +3,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCpp, validateFixtureBinary } from "../scripts/cpp.ts";
-import { IssueMessage } from "../src/shared/generated/protocol.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "validate-"));
-const short = IssueMessage.TooShort({ limit: 5 });
-const required = IssueMessage.Missing();
+// reflect-cpp's own messages, as each validator words them.
+const short =
+	"Size validation failed: Value expected to be greater than or equal to 5, but got 4.";
+const notTxt = (name: string) =>
+	`String '${name}' did not match format '.txt file name': '^.+\\.txt$'.`;
+const required = "Required";
 
 /** The [message, ...path] of each issue the C++ walker finds in `batch`. */
 function issues(batch: object): unknown[] {
@@ -53,19 +56,9 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 		).toEqual([
 			[short, "files", 1, "input"],
 			[required, "files", 1, "outputFile"],
-			[
-				IssueMessage.FileNotFound({ value: "missing.txt" }),
-				"files",
-				2,
-				"input",
-			],
-			[
-				IssueMessage.NotTxtFile({ value: "out.json" }),
-				"files",
-				2,
-				"outputFile",
-			],
-			[IssueMessage.NotTxtFile({ value: "label.md" }), "label"],
+			["No such file or directory", "files", 2, "input"],
+			[notTxt("out.json"), "files", 2, "outputFile"],
+			[notTxt("label.md"), "label"],
 		]);
 	});
 
@@ -87,13 +80,8 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 				label: "label.txt",
 			}),
 		).toEqual([
-			[IssueMessage.SameAsInput(), "files", 0, "outputFile"],
-			[
-				IssueMessage.FileNotFound({ value: "missing.txt" }),
-				"files",
-				1,
-				"input",
-			],
+			["Must not be the input file", "files", 0, "outputFile"],
+			["No such file or directory", "files", 1, "input"],
 		]);
 	});
 
@@ -105,9 +93,12 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 				tags: ["notes.txt", "x.md"],
 			}),
 		).toEqual([
-			[IssueMessage.TooLong({ limit: 25 }), "label"],
+			[
+				"Size validation failed: Value expected to be less than or equal to 25, but got 30.",
+				"label",
+			],
 			[short, "tags", 1],
-			[IssueMessage.NotTxtFile({ value: "x.md" }), "tags", 1],
+			[notTxt("x.md"), "tags", 1],
 		]);
 	});
 });

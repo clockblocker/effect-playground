@@ -1,7 +1,7 @@
 import { useAtom } from "@effect/atom-react";
 import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
-import type { ReadFile } from "../../shared/generated/protocol.ts";
+import type { ReadFile } from "../../shared/read-file.ts";
 import { readFile } from "../clients.ts";
 import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 

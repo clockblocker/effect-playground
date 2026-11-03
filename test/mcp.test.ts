@@ -6,13 +6,10 @@ import { BunServices } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
-import { CustomCatCli } from "../src/server/custom-cat.ts";
-import { McpRoutes } from "../src/server/mcp.ts";
+import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { McpRoutes } from "../src/server/protocols/mcp.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "mcp-"));
-
-// What the C++ PlainName rule's rfl::PatternValidator carries.
-const plainName = String.raw`^(?!\.\.?$)[^/\\]*$`;
 
 const disposers: Array<() => Promise<void>> = [];
 
@@ -115,7 +112,7 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 		expect(initialized.session ?? "").not.toBe("");
 	});
 
-	test("lists custom_cat with the generated request's fields", async () => {
+	test("lists custom_cat with the request's fields, by shape alone", async () => {
 		const { body } = await post("tools/list");
 		expect(body.result.tools).toEqual([
 			expect.objectContaining({
@@ -123,18 +120,8 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 				inputSchema: expect.objectContaining({
 					type: "object",
 					properties: {
-						inputFile: {
-							type: "string",
-							minLength: 5,
-							maxLength: 25,
-							pattern: plainName,
-						},
-						outputFile: {
-							type: "string",
-							minLength: 5,
-							maxLength: 25,
-							pattern: plainName,
-						},
+						inputFile: { type: "string" },
+						outputFile: { type: "string" },
 					},
 					required: ["inputFile", "outputFile"],
 				}),
@@ -153,24 +140,21 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 		);
 	});
 
-	test("answers an InvalidRequest with a tool error, a line per issue", async () => {
+	test("answers custom_cat's InvalidRequest with a tool error, a line per issue", async () => {
 		expect(await callCustomCat("config.json", "x.json")).toEqual({
 			content: [
 				{
 					type: "text",
 					text:
-						'inputFile: "config.json" is not a .txt file\n' +
-						'outputFile: "x.json" is not a .txt file',
+						"inputFile: String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.\n" +
+						"outputFile: String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.",
 				},
 			],
 			isError: true,
 		});
 		expect(await callCustomCat("missing.txt", "copy.txt")).toEqual({
 			content: [
-				{
-					type: "text",
-					text: 'inputFile: "missing.txt" does not exist',
-				},
+				{ type: "text", text: "inputFile: No such file or directory" },
 			],
 			isError: true,
 		});

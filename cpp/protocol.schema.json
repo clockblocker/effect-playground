@@ -3,9 +3,6 @@
     "type": "array",
     "prefixItems": [
         {
-            "$ref": "#/$defs/protocol__ReadFile"
-        },
-        {
             "$ref": "#/$defs/protocol__CustomCat"
         }
     ],
@@ -54,6 +51,10 @@
                         {
                             "type": "string",
                             "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^.+\\.txt$"
                         }
                     ]
                 },
@@ -71,6 +72,10 @@
                         {
                             "type": "string",
                             "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^.+\\.txt$"
                         }
                     ]
                 }
@@ -174,101 +179,6 @@
                 "message",
                 "path"
             ]
-        },
-        "protocol__ReadFile": {
-            "type": "object",
-            "properties": {
-                "payload": {
-                    "$ref": "#/$defs/protocol__ReadFileRequest"
-                },
-                "success": {
-                    "$ref": "#/$defs/protocol__ReadFileSuccess"
-                },
-                "error": {
-                    "anyOf": [
-                        {
-                            "$ref": "#/$defs/protocol__InvalidRequest__tagged"
-                        },
-                        {
-                            "$ref": "#/$defs/protocol__IoFailed__tagged"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "payload",
-                "success",
-                "error"
-            ]
-        },
-        "protocol__ReadFileRequest": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "description": "The file to read, such as \"hello.txt\", in the files directory.",
-                    "allOf": [
-                        {
-                            "type": "string",
-                            "minLength": 5
-                        },
-                        {
-                            "type": "string",
-                            "maxLength": 25
-                        },
-                        {
-                            "type": "string",
-                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "name"
-            ]
-        },
-        "protocol__ReadFileSuccess": {
-            "type": "object",
-            "properties": {
-                "contents": {
-                    "type": "string",
-                    "description": "The whole file, decoded as UTF-8."
-                }
-            },
-            "required": [
-                "contents"
-            ]
-        }
-    },
-    "x-issues": {
-        "Missing": {
-            "message": "Required"
-        },
-        "TooShort": {
-            "message": "Must be at least {limit} characters long",
-            "keyword": "minLength"
-        },
-        "TooLong": {
-            "message": "Must be at most {limit} characters long",
-            "keyword": "maxLength"
-        },
-        "NotPlainName": {
-            "message": "Must be a file name, not a path",
-            "keyword": "pattern"
-        },
-        "NotTxtFile": {
-            "message": "\"{value}\" is not a .txt file"
-        },
-        "LeavesFiles": {
-            "message": "\"{value}\" is a link, which could lead outside the files directory"
-        },
-        "FileNotFound": {
-            "message": "\"{value}\" does not exist"
-        },
-        "SameAsInput": {
-            "message": "Must not be the input file"
-        },
-        "SameFileAsInput": {
-            "message": "\"{value}\" is the input file under another name"
         }
     },
     "x-errors": {

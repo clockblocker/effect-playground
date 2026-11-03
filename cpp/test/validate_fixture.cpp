@@ -4,7 +4,6 @@
 #include <iostream>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
-#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -23,10 +22,12 @@ struct Pair {
 };
 
 struct Differs {
-	static constexpr std::string_view message = "Must not be the input file";
 	static constexpr auto field = &Pair::output_file;
-	static bool passes(const Pair& pair) {
-		return pair.input.value() != pair.output_file.value();
+	static rfl::Result<Pair> validate(const Pair& pair) {
+		if (pair.input.value() == pair.output_file.value()) {
+			return rfl::error("Must not be the input file");
+		}
+		return pair;
 	}
 };
 
@@ -35,7 +36,8 @@ struct Batch {
 	rfl::Description<"Rules under a description still run.", protocol::FileName>
 		label;
 	// Both rules on one level, so both can fail.
-	std::vector<Checked<std::string, protocol::MinLength<5>, protocol::TxtFile>>
+	std::vector<
+		Checked<std::string, rfl::Size<rfl::Minimum<5>>, protocol::TxtFile>>
 		tags;
 };
 

@@ -53,6 +53,14 @@ async function run(args: readonly string[]) {
 
 const file = (name: string) => Bun.file(join(directory, "files", name));
 
+// reflect-cpp's own messages, as each validator words them.
+const notTxt = (name: string) =>
+	`String '${name}' did not match format '.txt file name': '^.+\\.txt$'.`;
+const notPlain = (name: string) =>
+	`String '${name}' did not match format 'plain file name': '^(?!\\.\\.?$)[^/\\\\]*$'.`;
+const tooShort = (size: number) =>
+	`Size validation failed: Value expected to be greater than or equal to 5, but got ${size}.`;
+
 describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 	beforeAll(buildCpp, 600_000);
 	afterEach(() => {
@@ -93,14 +101,8 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(JSON.parse(result.stdout)).toEqual({
 			_tag: "InvalidRequest",
 			issues: [
-				{
-					message: '"config.json" is not a .txt file',
-					path: ["inputFile"],
-				},
-				{
-					message: '"x.json" is not a .txt file',
-					path: ["outputFile"],
-				},
+				{ message: notTxt("config.json"), path: ["inputFile"] },
+				{ message: notTxt("x.json"), path: ["outputFile"] },
 			],
 		});
 		expect(invalidRequest(result.stdout)).toBeInstanceOf(
@@ -109,7 +111,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(await file("x.json").exists()).toBe(false);
 	});
 
-	test("reports a missing input as FileNotFound", async () => {
+	test("reports a missing input in the system's words", async () => {
 		const result = await customCat([
 			"--input-file=missing.txt",
 			"--output-file=copy.txt",
@@ -117,7 +119,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result).toEqual({
 			stdout:
 				'{"_tag":"InvalidRequest","issues":[{' +
-				'"message":"\\"missing.txt\\" does not exist","path":["inputFile"]}]}\n',
+				'"message":"No such file or directory","path":["inputFile"]}]}\n',
 			stderr: "",
 			exitCode: 1,
 		});
@@ -131,10 +133,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
-			{
-				message: "Must be at least 5 characters long",
-				path: ["inputFile"],
-			},
+			{ message: tooShort(4), path: ["inputFile"] },
 		]);
 	});
 
@@ -146,7 +145,8 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				message: "Must be at most 25 characters long",
+				message:
+					"Size validation failed: Value expected to be less than or equal to 25, but got 27.",
 				path: ["outputFile"],
 			},
 		]);
@@ -159,18 +159,12 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
-			{
-				message: "Must be at least 5 characters long",
-				path: ["inputFile"],
-			},
-			{
-				message: "Must be at least 5 characters long",
-				path: ["outputFile"],
-			},
+			{ message: tooShort(4), path: ["inputFile"] },
+			{ message: tooShort(4), path: ["outputFile"] },
 		]);
 	});
 
-	test("reports a missing flag as Missing, on its field", async () => {
+	test("reports a missing flag on its field", async () => {
 		const result = await customCat(["--input-file=hello.txt"]);
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
@@ -249,7 +243,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=missing.txt",
 		]);
 		expect(invalidRequest(result.stdout).issues).toEqual([
-			{ message: '"missing.txt" does not exist', path: ["inputFile"] },
+			{ message: "No such file or directory", path: ["inputFile"] },
 		]);
 	});
 
@@ -260,11 +254,8 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
-			{ message: "Must be a file name, not a path", path: ["inputFile"] },
-			{
-				message: "Must be a file name, not a path",
-				path: ["outputFile"],
-			},
+			{ message: notPlain("../files/hello.txt"), path: ["inputFile"] },
+			{ message: notPlain("../x.txt"), path: ["outputFile"] },
 		]);
 		expect(await Bun.file(join(directory, "x.txt")).exists()).toBe(false);
 	});

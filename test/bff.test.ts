@@ -12,10 +12,15 @@ import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Result } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
-import { BffReader } from "../src/server/bff-reader.ts";
-import { CustomCatCli } from "../src/server/custom-cat.ts";
-import { RestRoutes } from "../src/server/rest.ts";
-import { IoFailed, ReadFile } from "../src/shared/generated/protocol.ts";
+import { BffReader } from "../src/server/bun-side/bff-reader.ts";
+import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { RestRoutes } from "../src/server/protocols/rest.ts";
+import { IoFailed } from "../src/shared/generated/protocol.ts";
+import { ReadFile } from "../src/shared/read-file.ts";
+
+// Effect's own messages, for the rules ReadFile.Request checks.
+const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";
+const notPlain = String.raw`Expected a string matching the RegExp ^(?!\.\.?$)[^/\\]*$`;
 
 const readIn = (layer: typeof BffReader.layer) => (name: string) =>
 	Effect.runPromise(
@@ -106,20 +111,18 @@ describe("BffReader", () => {
 		expect(await read("config.json")).toEqual(
 			Result.fail(
 				new ReadFile.InvalidRequest({
-					issues: [
-						{
-							message: '"config.json" is not a .txt file',
-							path: ["name"],
-						},
-					],
+					issues: [{ message: notTxt, path: ["name"] }],
 				}),
 			),
 		);
-		expect(issuesOf(await read("missing.txt"))).toEqual([
+		expect(issuesOf(await read("x.md"))).toEqual([
 			{
-				message: '"missing.txt" does not exist',
+				message: "Expected a string with at least 5 code points",
 				path: ["name"],
 			},
+		]);
+		expect(issuesOf(await read("missing.txt"))).toEqual([
+			{ message: "no such file or directory", path: ["name"] },
 		]);
 	});
 });
@@ -158,13 +161,9 @@ describe("BffReader in a files/ of its own", () => {
 		);
 	});
 
-	test("refuses a path that leads outside, even unchecked", async () => {
+	test("refuses a path before looking at the files", async () => {
 		expect(issuesOf(await readScratch("../outside.txt"))).toEqual([
-			{
-				message:
-					'"../outside.txt" is a link, which could lead outside the files directory',
-				path: ["name"],
-			},
+			{ message: notPlain, path: ["name"] },
 		]);
 	});
 });
@@ -190,12 +189,7 @@ describe("REST", () => {
 		expect(status).toBe(422);
 		expect(JSON.parse(body)).toEqual({
 			_tag: "InvalidRequest",
-			issues: [
-				{
-					message: '"config.json" is not a .txt file',
-					path: ["name"],
-				},
-			],
+			issues: [{ message: notTxt, path: ["name"] }],
 		});
 		expect((await get("missing.txt")).status).toBe(422);
 		expect(
@@ -204,35 +198,21 @@ describe("REST", () => {
 		).toBe(422);
 	});
 
-	test("answers a rule the schema checks with 422 and its issues, too", async () => {
-		const short = await get("x.md");
-		expect(short.status).toBe(422);
-		expect(JSON.parse(short.body)).toEqual({
-			_tag: "InvalidRequest",
-			issues: [
-				{
-					message: "Must be at least 5 characters long",
-					path: ["name"],
-				},
-			],
-		});
+	test("leaves a copy's rules to custom_cat, its issues as it words them", async () => {
 		const both = await copy({ inputFile: "hi", outputFile: "../x.txt" });
 		expect(both.status).toBe(422);
 		expect(JSON.parse(both.body).issues).toEqual([
 			{
-				message: "Must be at least 5 characters long",
+				message:
+					"Size validation failed: Value expected to be greater than or equal to 5, but got 2.",
 				path: ["inputFile"],
 			},
 			{
-				message: "Must be a file name, not a path",
+				message: String.raw`String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.`,
 				path: ["outputFile"],
 			},
 		]);
-		const missing = await copy({ inputFile: "hello.txt" });
-		expect(missing.status).toBe(422);
-		expect(JSON.parse(missing.body).issues).toEqual([
-			{ message: "Required", path: ["outputFile"] },
-		]);
+		expect(await Bun.file(join(scratch, "x.txt")).exists()).toBe(false);
 	});
 
 	test("answers a request of the wrong shape with 422 and its issues, before the handler", async () => {
@@ -242,7 +222,7 @@ describe("REST", () => {
 			_tag: "InvalidRequest",
 			issues: [
 				{ message: "Expected string", path: ["inputFile"] },
-				{ message: "Required", path: ["outputFile"] },
+				{ message: "Missing key", path: ["outputFile"] },
 			],
 		});
 		const unknownField = await copy({
@@ -252,7 +232,7 @@ describe("REST", () => {
 		});
 		expect(unknownField.status).toBe(422);
 		expect(JSON.parse(unknownField.body).issues).toEqual([
-			{ message: "verbose: Unknown field", path: [] },
+			{ message: "verbose: Expected no excess property", path: [] },
 		]);
 		const notAnObject = await copy([]);
 		expect(notAnObject.status).toBe(422);

@@ -1,8 +1,8 @@
 import { Cause, Effect, Layer } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
-import { BffRpcs } from "../shared/rpc.ts";
-import { BffReader } from "./bff-reader.ts";
-import { CustomCatCli } from "./custom-cat.ts";
+import { BffRpcs } from "../../shared/rpc.ts";
+import { BffReader } from "../bun-side/bff-reader.ts";
+import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 
 // RpcServer sends a defect to the client without logging it.
 const logDefects = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
