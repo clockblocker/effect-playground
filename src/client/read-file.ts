@@ -8,9 +8,10 @@ import { BffClient, BffRpcClient } from "./clients.ts";
 // list BackendUnavailable: hover one to see it.
 
 export const rest = {
-	bff: (name: string) => BffClient.use((client) => client.bff.read(name)),
+	bff: (name: string) =>
+		BffClient.use((client) => client.bff.read({ params: { name } })),
 	backend: (name: string) =>
-		BffClient.use((client) => client.backend.read(name)),
+		BffClient.use((client) => client.backend.read({ params: { name } })),
 };
 
 // RPC answers with the success struct; its contents make it look like REST.

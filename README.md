@@ -51,8 +51,9 @@ Each reader has its own endpoint and procedure, so only the backend ones
 declare `BackendUnavailable`:
 
 - REST: `GET /api/bff/files/read/:name` and
-  `GET /api/backend/files/read/:name`, called as `client.bff.read(…)` and
-  `client.backend.read(…)`.
+  `GET /api/backend/files/read/:name`, called as
+  `client.bff.read({ params: { name } })` and
+  `client.backend.read({ params: { name } })` on the client HttpApi derives.
 - RPC: `ReadFileBff({ name })` and `ReadFileBackend({ name })`, both over
   `POST /rpc`.
 

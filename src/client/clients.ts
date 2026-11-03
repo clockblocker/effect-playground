@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, type Effect, Layer, ManagedRuntime } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
@@ -16,35 +16,26 @@ type Plain<T> =
 		? Effect.Effect<A, E, R>
 		: never;
 
-// Each reader group's read endpoint, taking just the file name. The errors
-// are the endpoint's own (from the contract) plus the client's transport
-// errors, all inferred, so nothing here restates them.
-type Readers<Client> = {
-	readonly [Reader in keyof Client]: {
-		readonly read: (name: string) => Client[Reader] extends {
-			readonly read: (...args: never) => infer Out;
-		}
-			? Plain<Out>
+// The generated client, with each method's result re-stated as a plain Effect.
+type PlainClient<Client> = {
+	readonly [Group in keyof Client]: {
+		readonly [Endpoint in keyof Client[Group]]: Client[Group][Endpoint] extends (
+			request: infer Request,
+		) => infer Out
+			? (request: Request) => Plain<Out>
 			: never;
 	};
 };
 
-// The REST client as client.bff.read(name) and client.backend.read(name). A
-// reader added to the contract fails BffClient.of below until it is wired up.
+// The client HttpApi derives from the REST contract, unchanged; only its type
+// is re-stated: client.bff.read({ params: { name } }), client.backend.read(…).
 export class BffClient extends Context.Service<
 	BffClient,
-	Readers<HttpApiClient.ForApi<typeof BffApi>>
+	PlainClient<HttpApiClient.ForApi<typeof BffApi>>
 >()("effect-playground/BffClient") {
 	static readonly layer = Layer.effect(
 		BffClient,
-		Effect.map(HttpApiClient.make(BffApi, { baseUrl: origin }), (client) =>
-			BffClient.of({
-				bff: { read: (name) => client.bff.read({ params: { name } }) },
-				backend: {
-					read: (name) => client.backend.read({ params: { name } }),
-				},
-			}),
-		),
+		HttpApiClient.make(BffApi, { baseUrl: origin }),
 	);
 }
 
