@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
 	Context,
+	Data,
 	Duration,
 	Effect,
 	Layer,
@@ -23,6 +24,21 @@ const decodeInvalidRequest = Schema.decodeUnknownEffect(
 const decodeIoFailed = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(IoFailed),
 );
+
+/**
+ * custom_cat's output doesn't match the protocol: the BFF and custom_cat
+ * disagree. A defect, never a failure, since no caller can act on it.
+ */
+export class ContractMismatch extends Data.TaggedError("ContractMismatch")<{
+	readonly exitCode: number;
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly issue: string;
+}> {
+	override get message(): string {
+		return `custom_cat's output doesn't match the protocol (exit ${this.exitCode}): ${this.issue}`;
+	}
+}
 
 const text = (stream: Stream.Stream<Uint8Array, unknown>) =>
 	stream.pipe(Stream.decodeText(), Stream.mkString);
@@ -110,28 +126,52 @@ export class CustomCatCli extends Context.Service<
 							{ concurrency: "unbounded" },
 						);
 
+						const mismatch = (issue: string) => {
+							const defect = new ContractMismatch({
+								exitCode,
+								stdout,
+								stderr,
+								issue,
+							});
+							return Effect.logError(defect.message, defect).pipe(
+								Effect.andThen(Effect.die(defect)),
+							);
+						};
+						const decoded = <A>(
+							effect: Effect.Effect<A, Schema.SchemaError>,
+						) =>
+							effect.pipe(
+								Effect.catchTag("SchemaError", ({ message }) =>
+									mismatch(message),
+								),
+							);
+
 						switch (exitCode) {
 							case 0:
-								return yield* decodeSuccess(stdout).pipe(
-									Effect.orDie,
-								);
+								return yield* decoded(decodeSuccess(stdout));
 							case 1:
 								return yield* Effect.fail(
-									yield* decodeInvalidRequest(stdout).pipe(
-										Effect.orDie,
+									yield* decoded(
+										decodeInvalidRequest(stdout),
 									),
+								);
+							case 2:
+								return yield* mismatch(
+									`custom_cat rejected its arguments: ${stderr.trim()}`,
 								);
 							case 3:
 								return yield* Effect.fail(
-									yield* decodeIoFailed(stdout).pipe(
-										Effect.orDie,
+									yield* decoded(decodeIoFailed(stdout)),
+								);
+							case 4:
+								return yield* Effect.die(
+									new Error(
+										`custom_cat failed: ${stderr.trim()}`,
 									),
 								);
 							default:
-								return yield* Effect.die(
-									new Error(
-										`custom_cat exited with ${exitCode}: ${stderr.trim()}`,
-									),
+								return yield* mismatch(
+									`${exitCode} isn't one of custom_cat's exit codes`,
 								);
 						}
 					},

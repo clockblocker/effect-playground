@@ -10,10 +10,11 @@ import {
 	Exit,
 	Fiber,
 	Layer,
+	Logger,
 	Result,
 } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
-import { CustomCatCli } from "../src/server/custom-cat.ts";
+import { ContractMismatch, CustomCatCli } from "../src/server/custom-cat.ts";
 import { CliFailed } from "../src/shared/cli-failed.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 
@@ -218,16 +219,91 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 		expect(await goneSoon(pid)).toBe(true);
 	});
 
-	test("dies on an exit custom_cat doesn't document", async () => {
-		const binary = await script("odd", "echo odd >&2\nexit 9");
+	describe("dies with ContractMismatch, logged, when custom_cat", () => {
+		/** The exit of a run whose custom_cat is a script, and what was logged. */
+		const runScript = async (name: string, body: string) => {
+			const logged: Array<{ level: string; message: unknown }> = [];
+			const logger = Logger.make(({ logLevel, message }) => {
+				logged.push({ level: logLevel, message });
+			});
+			const exit = await Effect.runPromiseExit(
+				Effect.gen(function* () {
+					return yield* (yield* CustomCatCli).run(request);
+				}).pipe(
+					Effect.provide(
+						layerOf({ binary: await script(name, body) }),
+					),
+					Effect.provide(Logger.layer([logger])),
+				),
+			);
+			return { exit, logged };
+		};
+
+		const mismatchOf = (exit: Exit.Exit<unknown, unknown>) => {
+			expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(
+				false,
+			);
+			const defect = Exit.isFailure(exit) && Cause.squash(exit.cause);
+			expect(defect).toBeInstanceOf(ContractMismatch);
+			return defect as ContractMismatch;
+		};
+
+		test("prints what no schema decodes", async () => {
+			const { exit, logged } = await runScript(
+				"garbage",
+				"echo garbage\nexit 0",
+			);
+			const defect = mismatchOf(exit);
+			expect(defect).toMatchObject({
+				exitCode: 0,
+				stdout: "garbage\n",
+				stderr: "",
+			});
+			expect(defect.message).toStartWith(
+				"custom_cat's output doesn't match the protocol (exit 0): ",
+			);
+			expect(logged).toContainEqual({
+				level: "Error",
+				message: [defect.message, defect],
+			});
+		});
+
+		test("prints another exit code's output", async () => {
+			const defect = mismatchOf(
+				(await runScript("swapped", `echo '{"bytesCopied":6}'\nexit 1`))
+					.exit,
+			);
+			expect(defect.exitCode).toBe(1);
+		});
+
+		test("rejects its arguments", async () => {
+			const defect = mismatchOf(
+				(await runScript("usage", "echo 'bad flag' >&2\nexit 2")).exit,
+			);
+			expect(defect.issue).toBe(
+				"custom_cat rejected its arguments: bad flag",
+			);
+		});
+
+		test("exits with a code it doesn't have", async () => {
+			const defect = mismatchOf(
+				(await runScript("odd", "echo odd >&2\nexit 9")).exit,
+			);
+			expect(defect.issue).toBe("9 isn't one of custom_cat's exit codes");
+		});
+	});
+
+	test("dies with a plain defect when custom_cat reports something unexpected", async () => {
+		const binary = await script("broken", "echo broken >&2\nexit 4");
 		const exit = await Effect.runPromiseExit(
 			Effect.gen(function* () {
 				return yield* (yield* CustomCatCli).run(request);
 			}).pipe(Effect.provide(layerOf({ binary }))),
 		);
-		expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
-		expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
-			"custom_cat exited with 9: odd",
+		const defect = Exit.isFailure(exit) && Cause.squash(exit.cause);
+		expect(defect).not.toBeInstanceOf(ContractMismatch);
+		expect(defect instanceof Error && defect.message).toBe(
+			"custom_cat failed: broken",
 		);
 	});
 });

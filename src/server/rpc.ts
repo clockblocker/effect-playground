@@ -1,16 +1,24 @@
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { BffRpcs } from "../shared/rpc.ts";
 import { BffReader } from "./bff-reader.ts";
 import { CustomCatCli } from "./custom-cat.ts";
+
+// RpcServer sends a defect to the client without logging it.
+const logDefects = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	effect.pipe(
+		Effect.tapCause((cause) =>
+			Cause.hasDies(cause) ? Effect.logError(cause) : Effect.void,
+		),
+	);
 
 const BffRpcHandlers = BffRpcs.toLayer(
 	Effect.gen(function* () {
 		const reader = yield* BffReader;
 		const cli = yield* CustomCatCli;
 		return BffRpcs.of({
-			ReadFile: ({ name }) => reader.read(name),
-			CustomCat: (request) => cli.run(request),
+			ReadFile: ({ name }) => logDefects(reader.read(name)),
+			CustomCat: (request) => logDefects(cli.run(request)),
 		});
 	}),
 );
