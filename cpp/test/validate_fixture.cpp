@@ -23,7 +23,6 @@ struct Pair {
 };
 
 struct Differs {
-	static constexpr auto code = protocol::IssueCode::SameAsInput;
 	static constexpr std::string_view message = "Must not be the input file";
 	static constexpr auto field = &Pair::output_file;
 	static bool passes(const Pair& pair) {

@@ -14,12 +14,12 @@ import {
  *
  * Each procedure gets a TypeScript namespace of its own name. In it, its
  * payload is `Request` and its success `Success`; `Path` lists where in a
- * request a field is, `Issue` is a problem with one, and `InvalidRequest`
+ * request an issue can be, `Issue` is a problem there, and `InvalidRequest`
  * holds them. `Failure` is `InvalidRequest` or one of its other errors,
  * such as `IoFailed`. Every other definition only it uses keeps its own
  * name. A definition more than one procedure uses is declared once, before
- * the namespaces, as are the issue codes and their messages, and the errors
- * besides InvalidRequest.
+ * the namespaces, as are the rules' messages, and the errors besides
+ * InvalidRequest.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -123,20 +123,14 @@ const roleNames = [
 ] as const;
 
 /** The names declared before the namespaces, whatever the protocol. */
-const topLevelNames = [
-	"IssueCode",
-	"IssueMessage",
-	"FieldOf",
-	"fieldOf",
-] as const;
+const topLevelNames = ["IssueMessage", "FieldOf", "fieldOf"] as const;
 
 /**
- * `IssueCode`, `IssueMessage` with a function per code that fills in its
- * template, and `fieldOf`, which names an issue's field the way
- * react-hook-form does.
+ * `IssueMessage`, with a function per rule that fills in its template, and
+ * `fieldOf`, which names an issue's field the way react-hook-form does.
  */
 function issueDeclarations(issues: readonly IssueTemplate[]): string {
-	const message = ({ code, message }: IssueTemplate) => {
+	const message = ({ name: rule, message }: IssueTemplate) => {
 		const names = [
 			...new Set(
 				[...message.matchAll(placeholder)].map(([, name = ""]) => name),
@@ -155,16 +149,10 @@ function issueDeclarations(issues: readonly IssueTemplate[]): string {
 			names.length === 0
 				? JSON.stringify(message)
 				: templateCode(message);
-		return `${code}: (${parameter}) => ${body},`;
+		return `${rule}: (${parameter}) => ${body},`;
 	};
 	return [
-		"/** What an issue says is wrong with a field. */",
-		`export const IssueCode = Schema.Literals([${issues
-			.map(({ code }) => JSON.stringify(code))
-			.join(", ")}]);`,
-		"export type IssueCode = typeof IssueCode.Type;",
-		"",
-		"/** Each issue code's message, from the C++ template of its rule. */",
+		"/** Each rule's message, from its C++ template, by the rule's name. */",
 		"export const IssueMessage = {",
 		...issues.map(message),
 		"} as const;",
@@ -361,7 +349,7 @@ function pathDeclaration(
 			`${procedure.payload} has no fields, so no issue has a path`,
 		);
 	}
-	const tuples = paths.map(
+	const tuples = [...paths, []].map(
 		(path) =>
 			`Schema.Tuple([${path
 				.map((segment) =>
@@ -372,12 +360,8 @@ function pathDeclaration(
 				.join(", ")}])`,
 	);
 	return [
-		`/** Where in a ${procedure.name} request a field is, one path per field. */`,
-		`export const Path = ${
-			tuples.length === 1
-				? tuples[0]
-				: `Schema.Union([${tuples.join(", ")}])`
-		};`,
+		`/** Where in a ${procedure.name} request an issue is: a field, or [] for the whole request. */`,
+		`export const Path = Schema.Union([${tuples.join(", ")}]);`,
 		"export type Path = typeof Path.Type;",
 		"",
 	].join("\n");
@@ -389,9 +373,8 @@ function issueDeclaration(procedure: Procedure, issue: Definition): string {
 		`${name}: ${code},`,
 	];
 	return [
-		`/** A problem with a field of a ${procedure.name} request. */`,
+		`/** A problem with a ${procedure.name} request. */`,
 		"export const Issue = Schema.Struct({",
-		...field("code", "IssueCode"),
 		...field("message", "Schema.String"),
 		...field("path", "Path"),
 		"});",
@@ -523,42 +506,34 @@ function fieldCode(
 			)
 			.replaceAll(lengthBound, (_, bound = "", limit = "") => {
 				const keyword = bound === "Min" ? "minLength" : "maxLength";
-				return `Schema.is${bound}CodePoints(${limit}, ${checkAnnotations(issues, keyword, limit)})`;
+				return `Schema.is${bound}CodePoints(${limit}, ${checkOptions(issues, keyword, limit)})`;
 			})
 			.replaceAll(
 				patternCheck,
 				(_, pattern = "") =>
-					`Schema.isPattern(new RegExp(${pattern}, "u"), ${checkAnnotations(issues, "pattern")})`,
+					`Schema.isPattern(new RegExp(${pattern}, "u"), ${checkOptions(issues, "pattern")})`,
 			),
 	);
 }
 
-/**
- * The message of the issue code whose rule carries `keyword`, filled in, and
- * the code itself, which the REST API reads back to report the issue.
- */
-function checkAnnotations(
+/** The message of the rule that carries `keyword`, filled in. */
+function checkOptions(
 	issues: readonly IssueTemplate[],
 	keyword: string,
 	limit?: string,
 ): string {
 	const issue = issues.find((issue) => issue.keyword === keyword);
 	if (issue === undefined) {
-		throw new Error(
-			`A field has a ${keyword}, but no issue code's rule carries one`,
-		);
+		throw new Error(`A field has a ${keyword}, but no rule carries one`);
 	}
 	const named = issue.message.includes("{limit}");
-	return `{ message: IssueMessage.${issue.code}(${named ? `{ limit: ${limit} }` : ""}), ${issueCodeAnnotation}: ${JSON.stringify(issue.code)} }`;
+	return `{ message: IssueMessage.${issue.name}(${named ? `{ limit: ${limit} }` : ""}) }`;
 }
-
-/** The annotation on a schema check that names its issue code. */
-const issueCodeAnnotation = "issueCode";
 
 // A string's minLength and maxLength (from a rule's rfl::Size) arrive as code
 // point checks, annotated with the very `expected` text each check has by
-// default. That annotation goes, and the check gets the message of the issue
-// code whose rule carries the keyword, as the C++ side words it.
+// default. That annotation goes, and the check gets the message of the rule
+// that carries the keyword, as the C++ side words it.
 const lengthBound =
 	/Schema\.is(Min|Max)CodePoints\((\d+)\)\.annotate\(\{ "expected": "a string with at (?:least|most) \2 code points" \}\)/g;
 

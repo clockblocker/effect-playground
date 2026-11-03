@@ -30,17 +30,14 @@ describe("setFailure", () => {
 			new CustomCat.InvalidRequest({
 				issues: [
 					{
-						code: "SameAsInput",
 						message: "first",
 						path: ["outputFile"],
 					},
 					{
-						code: "NotTxtFile",
 						message: "second",
 						path: ["outputFile"],
 					},
 					{
-						code: "Missing",
 						message: "Required",
 						path: ["inputFile"],
 					},

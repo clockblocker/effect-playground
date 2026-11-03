@@ -9,21 +9,7 @@
 
 import { Schema } from "effect";
 
-/** What an issue says is wrong with a field. */
-export const IssueCode = Schema.Literals([
-	"Missing",
-	"TooShort",
-	"TooLong",
-	"NotPlainName",
-	"NotTxtFile",
-	"LeavesFiles",
-	"FileNotFound",
-	"SameAsInput",
-	"SameFileAsInput",
-]);
-export type IssueCode = typeof IssueCode.Type;
-
-/** Each issue code's message, from the C++ template of its rule. */
+/** Each rule's message, from its C++ template, by the rule's name. */
 export const IssueMessage = {
 	Missing: () => "Required",
 	TooShort: ({ limit }: { readonly limit: number }) =>
@@ -83,15 +69,12 @@ export namespace ReadFile {
 		name: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
-				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
-				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
-				issueCode: "NotPlainName",
 			}),
 		),
 	});
@@ -104,17 +87,21 @@ export namespace ReadFile {
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
 
-	/** Where in a ReadFile request a field is, one path per field. */
-	export const Path = Schema.Tuple([Schema.Literal("name")]);
+	/** Where in a ReadFile request an issue is: a field, or [] for the whole request. */
+	export const Path = Schema.Union([
+		Schema.Tuple([Schema.Literal("name")]),
+		Schema.Tuple([]),
+	]);
 	export type Path = typeof Path.Type;
 
-	/** A problem with a field of a ReadFile request. */
+	/** A problem with a ReadFile request. */
 	export const Issue = Schema.Struct({
-		/** What is wrong. */
-		code: IssueCode,
 		/** What is wrong, in a sentence. */
 		message: Schema.String,
-		/** Where the field is in the request, such as ["files", 2, "input"]. */
+		/**
+		 * Where in the request the problem is: a field, such as ["files", 2,
+		 * "input"], or [] for the request as a whole.
+		 */
 		path: Path,
 	});
 	export interface Issue extends Schema.Schema.Type<typeof Issue> {}
@@ -145,15 +132,12 @@ export namespace CustomCat {
 		inputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
-				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
-				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
-				issueCode: "NotPlainName",
 			}),
 		),
 		/**
@@ -163,15 +147,12 @@ export namespace CustomCat {
 		outputFile: Schema.String.check(
 			Schema.isMinCodePoints(5, {
 				message: IssueMessage.TooShort({ limit: 5 }),
-				issueCode: "TooShort",
 			}),
 			Schema.isMaxCodePoints(25, {
 				message: IssueMessage.TooLong({ limit: 25 }),
-				issueCode: "TooLong",
 			}),
 			Schema.isPattern(/^(?!\.\.?$)[^/\\]*$/u, {
 				message: IssueMessage.NotPlainName(),
-				issueCode: "NotPlainName",
 			}),
 		),
 	});
@@ -184,20 +165,22 @@ export namespace CustomCat {
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
 
-	/** Where in a CustomCat request a field is, one path per field. */
+	/** Where in a CustomCat request an issue is: a field, or [] for the whole request. */
 	export const Path = Schema.Union([
 		Schema.Tuple([Schema.Literal("inputFile")]),
 		Schema.Tuple([Schema.Literal("outputFile")]),
+		Schema.Tuple([]),
 	]);
 	export type Path = typeof Path.Type;
 
-	/** A problem with a field of a CustomCat request. */
+	/** A problem with a CustomCat request. */
 	export const Issue = Schema.Struct({
-		/** What is wrong. */
-		code: IssueCode,
 		/** What is wrong, in a sentence. */
 		message: Schema.String,
-		/** Where the field is in the request, such as ["files", 2, "input"]. */
+		/**
+		 * Where in the request the problem is: a field, such as ["files", 2,
+		 * "input"], or [] for the request as a whole.
+		 */
 		path: Path,
 	});
 	export interface Issue extends Schema.Schema.Type<typeof Issue> {}

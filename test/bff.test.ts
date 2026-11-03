@@ -108,7 +108,6 @@ describe("BffReader", () => {
 				new ReadFile.InvalidRequest({
 					issues: [
 						{
-							code: "NotTxtFile",
 							message: '"config.json" is not a .txt file',
 							path: ["name"],
 						},
@@ -118,7 +117,6 @@ describe("BffReader", () => {
 		);
 		expect(issuesOf(await read("missing.txt"))).toEqual([
 			{
-				code: "FileNotFound",
 				message: '"missing.txt" does not exist',
 				path: ["name"],
 			},
@@ -150,7 +148,6 @@ describe("BffReader in a files/ of its own", () => {
 		for (const name of ["out.txt", "in.txt"]) {
 			expect(issuesOf(await readScratch(name))).toEqual([
 				{
-					code: "LeavesFiles",
 					message: `"${name}" is a link, which could lead outside the files directory`,
 					path: ["name"],
 				},
@@ -162,8 +159,12 @@ describe("BffReader in a files/ of its own", () => {
 	});
 
 	test("refuses a path that leads outside, even unchecked", async () => {
-		expect(issuesOf(await readScratch("../outside.txt"))).toMatchObject([
-			{ code: "LeavesFiles" },
+		expect(issuesOf(await readScratch("../outside.txt"))).toEqual([
+			{
+				message:
+					'"../outside.txt" is a link, which could lead outside the files directory',
+				path: ["name"],
+			},
 		]);
 	});
 });
@@ -191,7 +192,6 @@ describe("REST", () => {
 			_tag: "InvalidRequest",
 			issues: [
 				{
-					code: "NotTxtFile",
 					message: '"config.json" is not a .txt file',
 					path: ["name"],
 				},
@@ -211,7 +211,6 @@ describe("REST", () => {
 			_tag: "InvalidRequest",
 			issues: [
 				{
-					code: "TooShort",
 					message: "Must be at least 5 characters long",
 					path: ["name"],
 				},
@@ -221,12 +220,10 @@ describe("REST", () => {
 		expect(both.status).toBe(422);
 		expect(JSON.parse(both.body).issues).toEqual([
 			{
-				code: "TooShort",
 				message: "Must be at least 5 characters long",
 				path: ["inputFile"],
 			},
 			{
-				code: "NotPlainName",
 				message: "Must be a file name, not a path",
 				path: ["outputFile"],
 			},
@@ -234,19 +231,34 @@ describe("REST", () => {
 		const missing = await copy({ inputFile: "hello.txt" });
 		expect(missing.status).toBe(422);
 		expect(JSON.parse(missing.body).issues).toEqual([
-			{ code: "Missing", message: "Required", path: ["outputFile"] },
+			{ message: "Required", path: ["outputFile"] },
 		]);
 	});
 
-	test("rejects a request of the wrong shape before the handler, with 400", async () => {
-		const wrongType = await copy({ inputFile: 1, outputFile: "x.txt" });
-		expect(wrongType).toEqual({ status: 400, body: "" });
+	test("answers a request of the wrong shape with 422 and its issues, before the handler", async () => {
+		const wrongType = await copy({ inputFile: 42 });
+		expect(wrongType.status).toBe(422);
+		expect(JSON.parse(wrongType.body)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [
+				{ message: "Expected string", path: ["inputFile"] },
+				{ message: "Required", path: ["outputFile"] },
+			],
+		});
 		const unknownField = await copy({
 			inputFile: "hello.txt",
 			outputFile: "x.txt",
 			verbose: true,
 		});
-		expect(unknownField.status).toBe(400);
+		expect(unknownField.status).toBe(422);
+		expect(JSON.parse(unknownField.body).issues).toEqual([
+			{ message: "verbose: Unknown field", path: [] },
+		]);
+		const notAnObject = await copy([]);
+		expect(notAnObject.status).toBe(422);
+		expect(JSON.parse(notAnObject.body).issues).toEqual([
+			{ message: "Expected object", path: [] },
+		]);
 		expect(await Bun.file(join(scratch, "files/x.txt")).exists()).toBe(
 			false,
 		);

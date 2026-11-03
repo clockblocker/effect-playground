@@ -94,12 +94,10 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			_tag: "InvalidRequest",
 			issues: [
 				{
-					code: "NotTxtFile",
 					message: '"config.json" is not a .txt file',
 					path: ["inputFile"],
 				},
 				{
-					code: "NotTxtFile",
 					message: '"x.json" is not a .txt file',
 					path: ["outputFile"],
 				},
@@ -118,7 +116,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result).toEqual({
 			stdout:
-				'{"_tag":"InvalidRequest","issues":[{"code":"FileNotFound",' +
+				'{"_tag":"InvalidRequest","issues":[{' +
 				'"message":"\\"missing.txt\\" does not exist","path":["inputFile"]}]}\n',
 			stderr: "",
 			exitCode: 1,
@@ -134,7 +132,6 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				code: "TooShort",
 				message: "Must be at least 5 characters long",
 				path: ["inputFile"],
 			},
@@ -149,7 +146,6 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				code: "TooLong",
 				message: "Must be at most 25 characters long",
 				path: ["outputFile"],
 			},
@@ -162,14 +158,15 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=y.md",
 		]);
 		expect(result.exitCode).toBe(1);
-		expect(
-			invalidRequest(result.stdout).issues.map(({ code, path }) => [
-				code,
-				...path,
-			]),
-		).toEqual([
-			["TooShort", "inputFile"],
-			["TooShort", "outputFile"],
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{
+				message: "Must be at least 5 characters long",
+				path: ["inputFile"],
+			},
+			{
+				message: "Must be at least 5 characters long",
+				path: ["outputFile"],
+			},
 		]);
 	});
 
@@ -177,7 +174,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		const result = await customCat(["--input-file=hello.txt"]);
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
-			{ code: "Missing", message: "Required", path: ["outputFile"] },
+			{ message: "Required", path: ["outputFile"] },
 		]);
 	});
 
@@ -221,7 +218,6 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				code: "SameAsInput",
 				message: "Must not be the input file",
 				path: ["outputFile"],
 			},
@@ -241,7 +237,6 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				code: "SameFileAsInput",
 				message: '"same.txt" is the input file under another name',
 				path: ["outputFile"],
 			},
@@ -253,9 +248,9 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--input-file=missing.txt",
 			"--output-file=missing.txt",
 		]);
-		expect(
-			invalidRequest(result.stdout).issues.map(({ code }) => code),
-		).toEqual(["FileNotFound"]);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{ message: '"missing.txt" does not exist', path: ["inputFile"] },
+		]);
 	});
 
 	test("takes a plain name, not a path", async () => {
@@ -264,14 +259,12 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=../x.txt",
 		]);
 		expect(result.exitCode).toBe(1);
-		expect(
-			invalidRequest(result.stdout).issues.map(({ code, path }) => [
-				code,
-				...path,
-			]),
-		).toEqual([
-			["NotPlainName", "inputFile"],
-			["NotPlainName", "outputFile"],
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{ message: "Must be a file name, not a path", path: ["inputFile"] },
+			{
+				message: "Must be a file name, not a path",
+				path: ["outputFile"],
+			},
 		]);
 		expect(await Bun.file(join(directory, "x.txt")).exists()).toBe(false);
 	});
@@ -292,13 +285,11 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
-				code: "LeavesFiles",
 				message:
 					'"out.txt" is a link, which could lead outside the files directory',
 				path: ["inputFile"],
 			},
 			{
-				code: "LeavesFiles",
 				message:
 					'"in.txt" is a link, which could lead outside the files directory',
 				path: ["outputFile"],

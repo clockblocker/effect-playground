@@ -7,8 +7,8 @@ output file, and `custom_cat` copies one to the other. Files live in
 `files/`.
 
 A request whose fields are wrong fails with `InvalidRequest`, which lists
-every problem as an **issue**: `{ code, message, path }`, the shape of a
-Standard Schema issue plus a code. The codes:
+every problem as an **issue**: `{ message, path }`, a Standard Schema
+issue. Each comes from a rule, named for what it reports:
 
 - `Missing`: the field is absent.
 - `TooShort`, `TooLong`: a name must be 5 to 25 characters long.
@@ -22,7 +22,7 @@ Standard Schema issue plus a code. The codes:
 - `SameFileAsInput`: the output is the input under another name, a hard
   link.
 
-The rules, and each code's message, live on C++ types, and everything else
+The rules, and each rule's message, live on C++ types, and everything else
 gets them from the generated schema (see below).
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
@@ -38,7 +38,7 @@ error channel), a `Die` (a defect) or an `Interrupt`.
 
 | Bucket | What it is | Effect | Type |
 |---|---|---|---|
-| Shape | a wrong type, a missing or unknown field | `Fail`, or `Die` on RPC | `InvalidRequest` where a code fits |
+| Shape | a wrong type, a missing or unknown field | `Fail`, or `Die` on RPC | `InvalidRequest` |
 | Rule | a value breaks a rule on its own, or against another field | `Fail` | `InvalidRequest` |
 | Precondition | a value conflicts with the files: the input is missing, a name is a link, the output is the input | `Fail` | `InvalidRequest` |
 | Dependency | a file can't be read or written, or `custom_cat` can't run | `Fail` | `IoFailed`, `CliFailed` |
@@ -68,7 +68,7 @@ How each surfaces:
 
 | Bucket | RPC (the page) | REST | MCP |
 |---|---|---|---|
-| Shape | the form shows the issue and sends nothing; a raw request gets a `Die` | an empty 400; a missing field is a 422 `Missing` issue | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
+| Shape | the form shows the issue and sends nothing; a raw request gets a `Die` | 422, the `InvalidRequest` as JSON | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
 | Rule, Precondition | `InvalidRequest`: each issue under its field | 422, the `InvalidRequest` as JSON | a tool error, a line per issue: `outputFile: Must not be the input file` |
 | Dependency | the error's `message` as the root message | `IoFailed` 500, `CliFailed` 503, as JSON | a tool error whose text is the `message` |
 | Transport | `Request failed: ` and its cause, such as `Transport error (POST …/rpc/)` | | |
@@ -87,12 +87,14 @@ without checks, decoded in the handler, would lose the typed payload the
 client encodes with. The page's client encodes the payload with the same
 schema before sending, and its forms check it first, so only a raw request
 meets it. HttpApi has the hook: `HttpApiMiddleware.layerSchemaErrorTransform`.
-A middleware on each endpoint turns a failure whose every issue has a code,
-from a rule the schema carries (`TooShort`, `TooLong`, `NotPlainName`) or a
-missing field (`Missing`), into the method's `InvalidRequest`, its issues
-from `SchemaIssue.makeFormatterStandardSchemaV1`; the generator annotates
-each check with its code. A wrong type or an unknown field has no code and
-stays HttpApi's 400.
+A middleware on each endpoint turns every request that doesn't decode, of
+the wrong shape or against a rule the schema carries (`TooShort`, `TooLong`,
+`NotPlainName`), into the method's `InvalidRequest`, its issues from
+`SchemaIssue.makeFormatterStandardSchemaV1`: `{"inputFile": 42}` is
+`Expected string` on `["inputFile"]` and `Required` on `["outputFile"]`. An
+issue off the method's fields goes on `[]`, the whole request, its message
+saying where: an unknown field is `verbose: Unknown field`, and a body that
+isn't an object `Expected object`. No form or MCP client meets `[]`.
 
 ## Prerequisites
 
@@ -130,7 +132,7 @@ What each transport serves:
   `client.files.read({ params: { name } })` and
   `client.files.copy({ payload })`. An `InvalidRequest` is a 422 whose body
   is its JSON, such as
-  `{"_tag":"InvalidRequest","issues":[{"code":"NotTxtFile","message":"\"config.json\" is not a .txt file","path":["name"]}]}`.
+  `{"_tag":"InvalidRequest","issues":[{"message":"\"config.json\" is not a .txt file","path":["name"]}]}`.
 - MCP, for MCP clients: the `custom_cat` tool, over Streamable HTTP at
   `/mcp`, protocol 2025-11-25 or 2025-06-18. Its parameters are
   `CustomCat.Request`; an `InvalidRequest` comes back as a tool error whose
@@ -171,7 +173,7 @@ rules, and only the input must exist. What it prints, and its exit codes:
 - 0, copied: stdout is `{"bytesCopied":18}`.
 - 1, a field is wrong, or missing: stdout is the `InvalidRequest`, with
   every issue, such as
-  `{"_tag":"InvalidRequest","issues":[{"code":"NotTxtFile","message":"\"config.json\" is not a .txt file","path":["inputFile"]},{"code":"NotTxtFile","message":"\"x.json\" is not a .txt file","path":["outputFile"]}]}`.
+  `{"_tag":"InvalidRequest","issues":[{"message":"\"config.json\" is not a .txt file","path":["inputFile"]},{"message":"\"x.json\" is not a .txt file","path":["outputFile"]}]}`.
 - 2, a usage error that names no field, such as an unknown flag:
   reflect-cpp's error, on stderr.
 - 3, a file couldn't be read or written: stdout is the `IoFailed`, such as
@@ -199,12 +201,12 @@ snake_case in C++ and camelCase in JSON, through reflect-cpp's
 `SnakeCaseToCamelCase` (`protocol::Wire`).
 
 A field carries its rules in its type, a `Checked<Base, Rules...>`
-(`cpp/include/checked.hpp`). A rule has an issue code, a message template and
+(`cpp/include/checked.hpp`). A rule has a name, a message template and
 a check:
 
 ```cpp
 struct TxtFile {
-	static constexpr IssueCode code = IssueCode::NotTxtFile;
+	static constexpr std::string_view name = "NotTxtFile";
 	static constexpr std::string_view message = "\"{value}\" is not a .txt file";
 	static bool passes(const std::string& value);
 };
@@ -225,7 +227,7 @@ member its issue goes on:
 
 ```cpp
 struct DifferentNames {
-	static constexpr IssueCode code = IssueCode::SameAsInput;
+	static constexpr std::string_view name = "SameAsInput";
 	static constexpr std::string_view message = "Must not be the input file";
 	static constexpr auto field = &CustomCatRequest::output_file;
 	static bool passes(const CustomCatRequest& request);
@@ -248,23 +250,25 @@ that fails, its path the fields' wire names and the arrays' indexes, such as
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A bound's `rfl::Size` validator becomes
    `minLength` or `maxLength`, and `PlainName`'s `rfl::PatternValidator` a
-   `pattern`. The tool adds `x-issues`, each code's template and, for a rule
-   with a schema, the keyword that carries it, and `x-errors`, the template
-   of each error besides `InvalidRequest`.
+   `pattern`. The tool adds `x-issues`, each rule's template, by its name,
+   and, for a rule with a schema, the keyword that carries it, and
+   `x-errors`, the template of each error besides `InvalidRequest`.
 2. `scripts/generate.ts` turns that into Effect Schema in one module,
    `src/shared/generated/protocol.ts`: a TypeScript namespace per method,
    named after it, such as `ReadFile`. In it, `Request` and `Success` are the
-   payload and the success, `Path` the union of every field's path, such as
-   `readonly ["inputFile"] | readonly ["outputFile"]`, `Issue` an issue on one
-   of them, and `InvalidRequest` a `Schema.TaggedError` with a non-empty
-   `issues`, whose `message` joins theirs. `Failure` is `InvalidRequest` or
+   payload and the success, `Path` the union of every field's path and `[]`,
+   the whole request, such as
+   `readonly ["inputFile"] | readonly ["outputFile"] | readonly []`, `Issue`
+   an issue at one of them, `{ message, path }`, and `InvalidRequest` a
+   `Schema.TaggedError` with a non-empty `issues`, whose `message` joins
+   theirs. `Failure` is `InvalidRequest` or
    `IoFailed` (`Failure`, because an `Error` there would shadow the global
    one). `IoFailed` is declared once, before the namespaces, a
    `Schema.TaggedError` whose `message` fills in its template. Each
    name is both the schema and its type, so `ReadFile.Success` works in
    either position, and TypeScript 7 hovers read `ReadFile.Success`. Before
-   the namespaces, `IssueCode` lists the codes, `IssueMessage` has a function
-   per code that fills in its template, such as
+   the namespaces, `IssueMessage` has a function per rule, by its name, that
+   fills in its template, such as
    `IssueMessage.NotTxtFile({ value })`, and `fieldOf(path)` turns a path into
    react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
    `"inputFile"`, a path `["files", number, "input"]` is
@@ -274,9 +278,8 @@ that fails, its path the fields' wire names and the arrays' indexes, such as
    statuses 422 and 500.
 
 A bound or a pattern travels as its JSON Schema keyword, and the TS field
-checks it with the message of the code that carries that keyword, and the
-code itself:
-`Schema.String.check(Schema.isMinCodePoints(5, { message: IssueMessage.TooShort({ limit: 5 }), issueCode: "TooShort" }), …)`.
+checks it with the message of the rule that carries that keyword:
+`Schema.String.check(Schema.isMinCodePoints(5, { message: IssueMessage.TooShort({ limit: 5 }) }), …)`.
 Each boundary rejects a name out of bounds, or a path:
 
 - REST: `:name` is `ReadFile.Request.fields.name`, so HttpApi rejects it
@@ -297,8 +300,9 @@ re-emits the schema and regenerates the TypeScript. Both outputs are
 committed. `bun run generate:check` fails if either is stale, or if
 `src/shared/generated/` holds a file the generator no longer writes. The
 generator fails on a template that names anything but `{value}` (or only
-`{limit}`, for a code a keyword carries), on a code without a template, on a
-keyword no code carries or two codes carry, on an error's template that
+`{limit}`, for a rule a keyword carries), on a keyword no rule carries or two
+rules carry, on an Issue with more than `message` and `path`, on an error's
+template that
 names anything but its fields, and on an error's field that would shadow the
 `Error`'s own, such as `message`.
 

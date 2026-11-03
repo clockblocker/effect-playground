@@ -1,11 +1,11 @@
 // protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
-// emits, plus "x-issues": each issue code's message template, and for a rule
-// with a Schema, the keyword that carries its limit, such as "minLength";
+// emits, plus "x-issues": each rule's message template, by its name, and for
+// a rule with a Schema, the keyword that carries its limit, such as
+// "minLength";
 // and "x-errors": the message template of each error that has one, by tag.
 // reflect-cpp only describes fields, and the rules live on types.
 
 #include <iostream>
-#include <map>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <stdexcept>
@@ -46,35 +46,27 @@ std::string keyword() {
 	return found;
 }
 
-using Templates = std::map<std::string, Generic::Object>;
-
+// In order of first use.
 template <class Request>
-void add_templates(Templates& templates) {
+void add_templates(Generic::Object& templates) {
 	validate::for_each_rule<Request>([&]<class Rule>() {
-		const auto code = rfl::enum_to_string(Rule::code);
+		const auto name = std::string(Rule::name);
 		Generic::Object entry;
 		entry["message"] = std::string(Rule::message);
 		if constexpr (checked::HasSchema<Rule>) entry["keyword"] = keyword<Rule>();
-		const auto [at, added] = templates.emplace(code, entry);
-		if (!added && rfl::json::write(at->second) != rfl::json::write(entry)) {
-			throw std::runtime_error(code + " has two message templates");
+		if (templates.count(name) == 0) {
+			templates[name] = entry;
+		} else if (rfl::json::write(templates[name]) != rfl::json::write(entry)) {
+			throw std::runtime_error(name + " has two message templates");
 		}
 	});
 }
 
 template <class... Procedures>
 Generic::Object issues(std::type_identity<std::tuple<Procedures...>>) {
-	Templates templates;
+	Generic::Object templates;
 	(add_templates<decltype(Procedures::payload)>(templates), ...);
-	Generic::Object result;
-	for (const auto& [code, name] : rfl::get_enumerator_array<protocol::IssueCode>()) {
-		const auto entry = templates.find(std::string(code));
-		if (entry == templates.end()) {
-			throw std::runtime_error(std::string(code) + " has no rule");
-		}
-		result[std::string(code)] = entry->second;
-	}
-	return result;
+	return templates;
 }
 
 template <class Error>

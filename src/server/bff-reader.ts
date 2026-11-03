@@ -16,14 +16,13 @@ import {
 } from "../shared/generated/protocol.ts";
 
 const invalidName = (
-	code: "NotTxtFile" | "LeavesFiles" | "FileNotFound",
+	rule: "NotTxtFile" | "LeavesFiles" | "FileNotFound",
 	name: string,
 ) =>
 	new ReadFile.InvalidRequest({
 		issues: [
 			{
-				code,
-				message: IssueMessage[code]({ value: name }),
+				message: IssueMessage[rule]({ value: name }),
 				path: ["name"],
 			},
 		],

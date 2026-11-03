@@ -10,9 +10,9 @@
 //   such as IoFailed, whose `message` template names its fields.
 // - A field's `rfl::Description` becomes its JSDoc.
 // - A request's field carries its rules in its type, a Checked<…> (see
-//   checked.hpp). Each failing rule becomes an Issue, with the rule's code and
-//   its message, in which `{value}` stands for the field's value and
-//   `{limit}` for the rule's limit. A missing field is a `Missing` issue.
+//   checked.hpp). Each failing rule becomes an Issue with the rule's message,
+//   in which `{value}` stands for the field's value and `{limit}` for the
+//   rule's limit. A missing field is a `Missing` issue.
 // - A rule across fields lives on the request, in its `Rules` (see
 //   validate.hpp), and names the field its issue goes on.
 
@@ -36,36 +36,14 @@ namespace protocol {
 // issue's path all pass it.
 using Wire = rfl::SnakeCaseToCamelCase;
 
-// Every way a field of a request can be wrong, each produced by one rule:
-//   Missing          the field is absent                      Present
-//   TooShort         fewer characters than the minimum        MinLength
-//   TooLong          more characters than the maximum         MaxLength
-//   NotPlainName     a path, or . or .., not a file name      PlainName
-//   NotTxtFile       the name doesn't end in .txt             TxtFile
-//   LeavesFiles      a link, which could lead out of files/   NotALink
-//   FileNotFound     no such file in files/                   ExistingFile
-//   SameAsInput      the output names the input               DifferentNames
-//   SameFileAsInput  the output is the input, linked          DifferentFiles
-enum class IssueCode {
-	Missing,
-	TooShort,
-	TooLong,
-	NotPlainName,
-	NotTxtFile,
-	LeavesFiles,
-	FileNotFound,
-	SameAsInput,
-	SameFileAsInput
-};
-
 // A field name, as on the wire, or an index into an array.
 using PathSegment = std::variant<std::string, int>;
 
 struct Issue {
-	rfl::Description<"What is wrong.", IssueCode> code;
 	rfl::Description<"What is wrong, in a sentence.", std::string> message;
-	rfl::Description<"Where the field is in the request, such as "
-					 "[\"files\", 2, \"input\"].",
+	rfl::Description<"Where in the request the problem is: a field, such as "
+					 "[\"files\", 2, \"input\"], or [] for the request "
+					 "as a whole.",
 					 std::vector<PathSegment>>
 		path;
 };
@@ -79,7 +57,7 @@ struct InvalidRequest {
 
 // The rule validate() applies to an absent field.
 struct Present {
-	static constexpr IssueCode code = IssueCode::Missing;
+	static constexpr std::string_view name = "Missing";
 	static constexpr std::string_view message = "Required";
 };
 
@@ -92,7 +70,7 @@ inline std::size_t characters(const std::string& value) {
 
 template <std::size_t N>
 struct MinLength {
-	static constexpr IssueCode code = IssueCode::TooShort;
+	static constexpr std::string_view name = "TooShort";
 	static constexpr std::string_view message =
 		"Must be at least {limit} characters long";
 	static constexpr std::size_t limit = N;
@@ -104,7 +82,7 @@ struct MinLength {
 
 template <std::size_t N>
 struct MaxLength {
-	static constexpr IssueCode code = IssueCode::TooLong;
+	static constexpr std::string_view name = "TooLong";
 	static constexpr std::string_view message =
 		"Must be at most {limit} characters long";
 	static constexpr std::size_t limit = N;
@@ -116,7 +94,7 @@ struct MaxLength {
 
 // The name of a file in files/, which never names anything outside it.
 struct PlainName {
-	static constexpr IssueCode code = IssueCode::NotPlainName;
+	static constexpr std::string_view name = "NotPlainName";
 	static constexpr std::string_view message = "Must be a file name, not a path";
 	using Schema = rfl::PatternValidator<R"(^(?!\.\.?$)[^/\\]*$)", "PlainName">;
 	static bool passes(const std::string& value) {
@@ -125,7 +103,7 @@ struct PlainName {
 };
 
 struct TxtFile {
-	static constexpr IssueCode code = IssueCode::NotTxtFile;
+	static constexpr std::string_view name = "NotTxtFile";
 	static constexpr std::string_view message = "\"{value}\" is not a .txt file";
 	static bool passes(const std::string& value) {
 		return std::filesystem::path(value).extension() == ".txt";
@@ -143,7 +121,7 @@ inline std::filesystem::path in_files(const std::string& name) {
 // Any link is refused, even one that stays in files/: following none is
 // simpler than checking where each leads.
 struct NotALink {
-	static constexpr IssueCode code = IssueCode::LeavesFiles;
+	static constexpr std::string_view name = "LeavesFiles";
 	static constexpr std::string_view message =
 		"\"{value}\" is a link, which could lead outside the files directory";
 	static bool passes(const std::string& value) {
@@ -160,7 +138,7 @@ struct NotALink {
 
 // Anything there passes, even a directory: that isn't about the name.
 struct ExistingFile {
-	static constexpr IssueCode code = IssueCode::FileNotFound;
+	static constexpr std::string_view name = "FileNotFound";
 	static constexpr std::string_view message = "\"{value}\" does not exist";
 	static bool passes(const std::string& value) {
 		std::error_code error;
@@ -228,7 +206,7 @@ struct CustomCatRequest {
 };
 
 struct DifferentNames {
-	static constexpr IssueCode code = IssueCode::SameAsInput;
+	static constexpr std::string_view name = "SameAsInput";
 	static constexpr std::string_view message = "Must not be the input file";
 	static constexpr auto field = &CustomCatRequest::output_file;
 	static bool passes(const CustomCatRequest& request) {
@@ -238,7 +216,7 @@ struct DifferentNames {
 
 // A hard link: NotALink already refuses symbolic ones.
 struct DifferentFiles {
-	static constexpr IssueCode code = IssueCode::SameFileAsInput;
+	static constexpr std::string_view name = "SameFileAsInput";
 	static constexpr std::string_view message =
 		"\"{value}\" is the input file under another name";
 	static constexpr auto field = &CustomCatRequest::output_file;

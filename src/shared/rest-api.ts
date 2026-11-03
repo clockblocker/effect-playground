@@ -35,18 +35,18 @@ const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));
 const ioFailed = IoFailed.pipe(withStatus(500));
 
 /**
- * Turns a request the schema rejects for a rule, such as a name too short,
- * into the method's InvalidRequest, as the handler or custom_cat would have.
- * A request of the wrong shape stays HttpApi's empty 400.
+ * Turns a request the schema rejects, of the wrong shape or for a rule such
+ * as a name too short, into the method's InvalidRequest, as the handler or
+ * custom_cat would have.
  */
-export class ReadFileRules extends HttpApiMiddleware.Service<ReadFileRules>()(
-	"effect-playground/ReadFileRules",
+export class ReadFileSchemaErrors extends HttpApiMiddleware.Service<ReadFileSchemaErrors>()(
+	"effect-playground/ReadFileSchemaErrors",
 	{ error: readFileInvalid },
 ) {}
 
-/** As ReadFileRules, for a copy. */
-export class CustomCatRules extends HttpApiMiddleware.Service<CustomCatRules>()(
-	"effect-playground/CustomCatRules",
+/** As ReadFileSchemaErrors, for a copy. */
+export class CustomCatSchemaErrors extends HttpApiMiddleware.Service<CustomCatSchemaErrors>()(
+	"effect-playground/CustomCatSchemaErrors",
 	{ error: customCatInvalid },
 ) {}
 
@@ -58,7 +58,7 @@ export class BffApi extends HttpApi.make("bff")
 					params,
 					success: Schema.String.pipe(HttpApiSchema.asText()),
 					error: [readFileInvalid, ioFailed],
-				}).middleware(ReadFileRules),
+				}).middleware(ReadFileSchemaErrors),
 				HttpApiEndpoint.post("copy", "/files/copy", {
 					payload: CustomCat.Request,
 					success: CustomCat.Success,
@@ -68,7 +68,7 @@ export class BffApi extends HttpApi.make("bff")
 						// custom_cat is a service the BFF depends on, like a backend.
 						CliFailed.pipe(withStatus(503)),
 					],
-				}).middleware(CustomCatRules),
+				}).middleware(CustomCatSchemaErrors),
 			)
 			.prefix("/api"),
 	)

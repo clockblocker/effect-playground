@@ -151,28 +151,13 @@
         "protocol__Issue": {
             "type": "object",
             "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "What is wrong.",
-                    "enum": [
-                        "Missing",
-                        "TooShort",
-                        "TooLong",
-                        "NotPlainName",
-                        "NotTxtFile",
-                        "LeavesFiles",
-                        "FileNotFound",
-                        "SameAsInput",
-                        "SameFileAsInput"
-                    ]
-                },
                 "message": {
                     "type": "string",
                     "description": "What is wrong, in a sentence."
                 },
                 "path": {
                     "type": "array",
-                    "description": "Where the field is in the request, such as [\"files\", 2, \"input\"].",
+                    "description": "Where in the request the problem is: a field, such as [\"files\", 2, \"input\"], or [] for the request as a whole.",
                     "items": {
                         "anyOf": [
                             {
@@ -186,7 +171,6 @@
                 }
             },
             "required": [
-                "code",
                 "message",
                 "path"
             ]

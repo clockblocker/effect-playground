@@ -59,8 +59,7 @@ std::string fill(const std::string& value) {
 
 template <class Rule>
 Issue issue(const std::string& value, const std::vector<PathSegment>& path) {
-	return Issue{
-		.code = Rule::code, .message = fill<Rule>(value), .path = path};
+	return Issue{.message = fill<Rule>(value), .path = path};
 }
 
 // Runs a Checked's rules, its base's first, and adds an issue per failed
@@ -86,7 +85,7 @@ bool check(std::type_identity<Checked<Base, Rules...>>,
 }
 
 // A struct's rules across its fields: `using Rules = std::tuple<…>`. A rule
-// has a `code`, a `message`, `static bool passes(const Struct&)`, and in
+// has a `name`, a `message`, `static bool passes(const Struct&)`, and in
 // `field` a pointer to the member its issue goes on, whose value fills
 // `{value}`.
 template <class T>

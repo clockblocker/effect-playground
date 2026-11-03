@@ -8,7 +8,6 @@ import {
 	CustomCat,
 	fieldOf,
 	IoFailed,
-	IssueCode,
 	IssueMessage,
 	ReadFile,
 } from "../src/shared/generated/protocol.ts";
@@ -21,7 +20,6 @@ const wire = {
 		_tag: "InvalidRequest",
 		issues: [
 			{
-				code: "NotTxtFile",
 				message: '"config.json" is not a .txt file',
 				path: ["name"],
 			},
@@ -84,7 +82,7 @@ describe("generated protocol", () => {
 		expect(() =>
 			decode({
 				...wire.invalidRequest,
-				issues: [{ ...wire.invalidRequest.issues[0], code: "Odd" }],
+				issues: [{ ...wire.invalidRequest.issues[0], path: ["file"] }],
 			}),
 		).toThrow();
 	});
@@ -110,12 +108,13 @@ describe("generated protocol", () => {
 		).toThrow();
 	});
 
-	test("an issue's path is one of its method's fields", () => {
+	test("an issue's path is one of its method's fields, or the whole request", () => {
 		const accepts = Schema.is(CustomCat.Path);
 		expect(accepts(["inputFile"])).toBe(true);
 		expect(accepts(["outputFile"])).toBe(true);
 		expect(accepts(["name"])).toBe(false);
 		expect(accepts(["inputFile", 0])).toBe(false);
+		expect(accepts([])).toBe(true);
 		expect(Schema.is(ReadFile.Path)(["name"])).toBe(true);
 		expect(Schema.is(ReadFile.Path)(["inputFile"])).toBe(false);
 	});
@@ -124,12 +123,10 @@ describe("generated protocol", () => {
 		const invalid = new CustomCat.InvalidRequest({
 			issues: [
 				{
-					code: "NotTxtFile",
 					message: IssueMessage.NotTxtFile({ value: "a.json" }),
 					path: ["inputFile"],
 				},
 				{
-					code: "Missing",
 					message: IssueMessage.Missing(),
 					path: ["outputFile"],
 				},
@@ -142,11 +139,18 @@ describe("generated protocol", () => {
 		).toEqual(["_tag", "issues"]);
 	});
 
-	test("the issue codes are the C++ enum's, each with its rule's template", async () => {
+	test("an issue is just a message and a path, each rule's template in IssueMessage", async () => {
 		const schema = await Bun.file(
 			new URL("../cpp/protocol.schema.json", import.meta.url),
 		).json();
-		const codes: string[] = [
+		expect(Object.keys(schema.$defs.protocol__Issue.properties)).toEqual([
+			"message",
+			"path",
+		]);
+		expect(Object.keys(IssueMessage)).toEqual(
+			Object.keys(schema["x-issues"]),
+		);
+		expect(Object.keys(IssueMessage)).toEqual([
 			"Missing",
 			"TooShort",
 			"TooLong",
@@ -156,16 +160,10 @@ describe("generated protocol", () => {
 			"FileNotFound",
 			"SameAsInput",
 			"SameFileAsInput",
-		];
-		expect<readonly string[]>(IssueCode.literals).toEqual(codes);
-		expect(schema.$defs.protocol__Issue.properties.code.enum).toEqual(
-			codes,
-		);
-		expect(Object.keys(schema["x-issues"])).toEqual(codes);
-		expect(Object.keys(IssueMessage)).toEqual(codes);
+		]);
 	});
 
-	test("each code's message is its C++ template, filled in", () => {
+	test("each rule's message is its C++ template, filled in", () => {
 		expect(IssueMessage.TooShort({ limit: 5 })).toBe(
 			"Must be at least 5 characters long",
 		);
@@ -187,12 +185,11 @@ describe("generated protocol", () => {
 				);
 			}).pipe(
 				Effect.catchTags({
-					InvalidRequest: ({ issues }) =>
-						Effect.succeed(issues.map(({ code }) => code)),
+					InvalidRequest: ({ issues }) => Effect.succeed(issues),
 				}),
 			),
 		);
-		expect(caught).toEqual(["NotTxtFile"]);
+		expect(caught).toEqual(wire.invalidRequest.issues);
 	});
 });
 
@@ -252,10 +249,6 @@ function fixture() {
 			a__Issue: {
 				type: "object",
 				properties: {
-					code: {
-						type: "string",
-						enum: ["Missing", "TooShort", "Lowercase", "Odd"],
-					},
 					message: { type: "string" },
 					path: {
 						type: "array",
@@ -264,7 +257,7 @@ function fixture() {
 						},
 					},
 				},
-				required: ["code", "message", "path"],
+				required: ["message", "path"],
 			},
 			a__Busy__tagged: {
 				type: "object",
@@ -343,7 +336,7 @@ describe("emitter", () => {
 	test("lists a path per field, through arrays by index", async () => {
 		const { source } = emit(normalize(fixture()), ["header"]);
 		expect(source).toContain(
-			'export const Path = Schema.Union([Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("input")]), Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("output")]), Schema.Tuple([Schema.Literal("label")]), Schema.Tuple([Schema.Literal("limit")])]);',
+			'export const Path = Schema.Union([Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("input")]), Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("output")]), Schema.Tuple([Schema.Literal("label")]), Schema.Tuple([Schema.Literal("limit")]), Schema.Tuple([])]);',
 		);
 		const { Get } = await load(fixture());
 		const accepts = Schema.is(Get.Path);
@@ -353,13 +346,13 @@ describe("emitter", () => {
 		expect(accepts(["files"])).toBe(false);
 		expect(accepts(["files", "2", "input"])).toBe(false);
 		expect(accepts(["files", 2, "label"])).toBe(false);
+		expect(accepts([])).toBe(true);
 		const decode = Schema.decodeUnknownSync(Get.InvalidRequest);
 		expect(
 			decode({
 				_tag: "InvalidRequest",
 				issues: [
 					{
-						code: "Odd",
 						message: "odd",
 						path: ["files", 2, "input"],
 					},
@@ -369,14 +362,14 @@ describe("emitter", () => {
 		expect(() =>
 			decode({
 				_tag: "InvalidRequest",
-				issues: [{ code: "Odd", message: "odd", path: ["nope"] }],
+				issues: [{ message: "odd", path: ["nope"] }],
 			}),
 		).toThrow();
 	});
 
-	test("writes each code's template as a function of its placeholders", async () => {
-		const { IssueCode, IssueMessage, fieldOf } = await load(fixture());
-		expect(IssueCode.literals).toEqual([
+	test("writes each rule's template as a function of its placeholders", async () => {
+		const { IssueMessage, fieldOf } = await load(fixture());
+		expect(Object.keys(IssueMessage)).toEqual([
 			"Missing",
 			"TooShort",
 			"Lowercase",
@@ -390,9 +383,9 @@ describe("emitter", () => {
 		expect(fieldOf(["files", 2, "input"])).toBe("files.2.input");
 	});
 
-	test("gives a length bound the message of the code that carries it", async () => {
+	test("gives a length bound the message of the rule that carries it", async () => {
 		expect(emitted(fixture())).toContain(
-			'Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }), issueCode: "TooShort" })',
+			"Schema.isMinCodePoints(2, { message: IssueMessage.TooShort({ limit: 2 }) })",
 		);
 		const { Get } = await load(fixture());
 		expect(() =>
@@ -400,9 +393,9 @@ describe("emitter", () => {
 		).toThrow("At least 2");
 	});
 
-	test("gives a pattern the message of the code that carries it", async () => {
+	test("gives a pattern the message of the rule that carries it", async () => {
 		expect(emitted(fixture())).toContain(
-			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase(), issueCode: "Lowercase" })',
+			'Schema.isPattern(new RegExp("^[a-z]*$", "u"), { message: IssueMessage.Lowercase() })',
 		);
 		const { Get } = await load(fixture());
 		expect(() =>
@@ -410,7 +403,7 @@ describe("emitter", () => {
 		).toThrow("Lowercase only");
 	});
 
-	test("rejects two codes that carry one keyword, or a keyword code that names the value", () => {
+	test("rejects two rules that carry one keyword, or a keyword rule that names the value", () => {
 		const document = fixture();
 		document["x-issues"].Odd = { message: "odd", keyword: "pattern" };
 		expect(() => normalize(document)).toThrow(
@@ -422,7 +415,7 @@ describe("emitter", () => {
 		);
 	});
 
-	test("rejects a bound no code carries", () => {
+	test("rejects a bound no rule carries", () => {
 		const document = fixture();
 		delete document["x-issues"].TooShort?.keyword;
 		expect(() => emitted(document)).toThrow(
@@ -430,7 +423,7 @@ describe("emitter", () => {
 		);
 		document["x-issues"].TooShort = { message: "short" };
 		expect(() => emitted(document)).toThrow(
-			"A field has a minLength, but no issue code's rule carries one",
+			"A field has a minLength, but no rule carries one",
 		);
 	});
 
@@ -442,11 +435,13 @@ describe("emitter", () => {
 		);
 	});
 
-	test("rejects codes that don't match the C++ enum", () => {
+	test("rejects an Issue with more than a message and a path", () => {
 		const document = fixture();
-		delete document["x-issues"].Odd;
+		Object.assign(document.$defs.a__Issue?.properties as object, {
+			code: { type: "string" },
+		});
 		expect(() => normalize(document)).toThrow(
-			"Issue.code must be the enum Missing, TooShort, Lowercase, the codes with templates",
+			"Issue must have just `message` (a string) and `path` (an array)",
 		);
 	});
 

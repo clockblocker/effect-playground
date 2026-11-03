@@ -3,10 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCpp, validateFixtureBinary } from "../scripts/cpp.ts";
+import { IssueMessage } from "../src/shared/generated/protocol.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "validate-"));
+const short = IssueMessage.TooShort({ limit: 5 });
+const required = IssueMessage.Missing();
 
-/** The [code, ...path] of each issue the C++ walker finds in `batch`. */
+/** The [message, ...path] of each issue the C++ walker finds in `batch`. */
 function issues(batch: object): unknown[] {
 	const result = Bun.spawnSync(
 		[validateFixtureBinary, JSON.stringify(batch)],
@@ -14,7 +17,10 @@ function issues(batch: object): unknown[] {
 	);
 	expect(result.exitCode).toBe(0);
 	return JSON.parse(result.stdout.toString()).map(
-		({ code, path }: { code: string; path: unknown[] }) => [code, ...path],
+		({ message, path }: { message: string; path: unknown[] }) => [
+			message,
+			...path,
+		],
 	);
 }
 
@@ -45,19 +51,29 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 				label: "label.md",
 			}),
 		).toEqual([
-			["TooShort", "files", 1, "input"],
-			["Missing", "files", 1, "outputFile"],
-			["FileNotFound", "files", 2, "input"],
-			["NotTxtFile", "files", 2, "outputFile"],
-			["NotTxtFile", "label"],
+			[short, "files", 1, "input"],
+			[required, "files", 1, "outputFile"],
+			[
+				IssueMessage.FileNotFound({ value: "missing.txt" }),
+				"files",
+				2,
+				"input",
+			],
+			[
+				IssueMessage.NotTxtFile({ value: "out.json" }),
+				"files",
+				2,
+				"outputFile",
+			],
+			[IssueMessage.NotTxtFile({ value: "label.md" }), "label"],
 		]);
 	});
 
 	test("reports a missing field at any depth", () => {
 		expect(issues({ files: [{}] })).toEqual([
-			["Missing", "files", 0, "input"],
-			["Missing", "files", 0, "outputFile"],
-			["Missing", "label"],
+			[required, "files", 0, "input"],
+			[required, "files", 0, "outputFile"],
+			[required, "label"],
 		]);
 	});
 
@@ -71,8 +87,13 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 				label: "label.txt",
 			}),
 		).toEqual([
-			["SameAsInput", "files", 0, "outputFile"],
-			["FileNotFound", "files", 1, "input"],
+			[IssueMessage.SameAsInput(), "files", 0, "outputFile"],
+			[
+				IssueMessage.FileNotFound({ value: "missing.txt" }),
+				"files",
+				1,
+				"input",
+			],
 		]);
 	});
 
@@ -84,9 +105,9 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 				tags: ["notes.txt", "x.md"],
 			}),
 		).toEqual([
-			["TooLong", "label"],
-			["TooShort", "tags", 1],
-			["NotTxtFile", "tags", 1],
+			[IssueMessage.TooLong({ limit: 25 }), "label"],
+			[short, "tags", 1],
+			[IssueMessage.NotTxtFile({ value: "x.md" }), "tags", 1],
 		]);
 	});
 });

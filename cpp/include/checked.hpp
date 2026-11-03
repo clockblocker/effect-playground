@@ -13,7 +13,7 @@
 // can report every rule that fails. Base is a raw type, or another Checked
 // whose rules run first.
 //
-// A rule has a `code`, a `message` and `static bool passes(const Raw&)`. With
+// A rule has a `name`, a `message` and `static bool passes(const Raw&)`. With
 // `using Schema = …`, a reflect-cpp validator, and its `limit`, the JSON
 // Schema carries the constraint too.
 template <class Base, class... Rules>

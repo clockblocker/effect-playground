@@ -27,9 +27,9 @@ export interface ErrorTemplate {
 	readonly message: string;
 }
 
-/** An issue code's message, from the rule that produces it. */
+/** A rule's message, by the rule's name. */
 export interface IssueTemplate {
-	readonly code: string;
+	readonly name: string;
 	/** `{value}` stands for the field's value, `{limit}` for the rule's limit. */
 	readonly message: string;
 	/** The JSON Schema keyword that carries the limit, such as `minLength`. */
@@ -41,7 +41,7 @@ export interface Protocol {
 	readonly namespace: string;
 	readonly procedures: readonly Procedure[];
 	readonly definitions: ReadonlyMap<string, Definition>;
-	/** In the order of the C++ `IssueCode` enum. */
+	/** In the order the requests first use them. */
 	readonly issues: readonly IssueTemplate[];
 	/** The `Issue` and `InvalidRequest` structs, which every procedure shares. */
 	readonly issue: Definition;
@@ -129,10 +129,7 @@ export function normalize(document: unknown): Protocol {
 	const invalidRequest = required(definitions, "InvalidRequest");
 	const issue = required(definitions, "Issue");
 	checkInvalidRequest(invalidRequest);
-	checkIssue(
-		issue,
-		issues.map(({ code }) => code),
-	);
+	checkIssue(issue);
 	const errors = errorTemplates(
 		[...new Set(procedures.flatMap(({ errors }) => errors))].map((name) =>
 			required(definitions, name),
@@ -249,44 +246,42 @@ function procedure(
 }
 
 /**
- * The schema's "x-issues": each code's template, whose every `{name}` is
- * `{value}`, or `{limit}` for a code with a keyword, which no other code
+ * The schema's "x-issues": each rule's template, whose every `{name}` is
+ * `{value}`, or `{limit}` for a rule with a keyword, which no other rule
  * carries.
  */
 function issueTemplates(raw: unknown): IssueTemplate[] {
 	if (!Predicate.isObject(raw) || Object.keys(raw).length === 0) {
-		throw new Error(
-			`Expected the issue codes' templates in "${issuesKeyword}"`,
-		);
+		throw new Error(`Expected the rules' templates in "${issuesKeyword}"`);
 	}
 	const carriers = new Map<string, string>();
-	return Object.entries(raw).map(([code, entry]) => {
+	return Object.entries(raw).map(([rule, entry]) => {
 		const message = Predicate.isObject(entry) ? entry.message : undefined;
 		const keyword = Predicate.isObject(entry) ? entry.keyword : undefined;
 		if (typeof message !== "string") {
-			throw new Error(`${code} has no message template`);
+			throw new Error(`${rule} has no message template`);
 		}
 		if (keyword !== undefined && typeof keyword !== "string") {
-			throw new Error(`${code}'s keyword must be a string`);
+			throw new Error(`${rule}'s keyword must be a string`);
 		}
 		if (keyword !== undefined) {
 			const other = carriers.get(keyword);
 			if (other !== undefined) {
-				throw new Error(`${other} and ${code} both carry ${keyword}`);
+				throw new Error(`${other} and ${rule} both carry ${keyword}`);
 			}
-			carriers.set(keyword, code);
+			carriers.set(keyword, rule);
 		}
 		// A schema check's message is the same for every value.
 		const names = keyword === undefined ? ["value"] : ["limit"];
 		for (const [, name = ""] of message.matchAll(placeholder)) {
 			if (!names.includes(name)) {
 				throw new Error(
-					`${code}'s message names {${name}}, but only ` +
+					`${rule}'s message names {${name}}, but only ` +
 						`${names.map((n) => `{${n}}`).join(" and ")} can be filled in`,
 				);
 			}
 		}
-		return { code, message, keyword };
+		return { name: rule, message, keyword };
 	});
 }
 
@@ -318,22 +313,16 @@ function checkInvalidRequest(definition: Definition): void {
 	}
 }
 
-/** `{ code, message, path }`, its codes those that have templates. */
-function checkIssue(definition: Definition, codes: readonly string[]): void {
-	const { code, message, path } = properties(definition);
-	const fields = Object.keys(properties(definition));
+/** `{ message, path }`, a Standard Schema issue: a string and an array. */
+function checkIssue(definition: Definition): void {
+	const { message, path } = properties(definition);
 	if (
-		fields.length !== 3 ||
+		Object.keys(properties(definition)).length !== 2 ||
 		message?.type !== "string" ||
 		path?.type !== "array"
 	) {
 		throw new Error(
-			"Issue must have just `code`, `message` (a string) and `path` (an array)",
-		);
-	}
-	if (JSON.stringify(code?.enum) !== JSON.stringify(codes)) {
-		throw new Error(
-			`Issue.code must be the enum ${codes.join(", ")}, the codes with templates`,
+			"Issue must have just `message` (a string) and `path` (an array)",
 		);
 	}
 }

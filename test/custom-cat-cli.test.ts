@@ -103,12 +103,10 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 				new CustomCat.InvalidRequest({
 					issues: [
 						{
-							code: "FileNotFound",
 							message: '"missing.txt" does not exist',
 							path: ["inputFile"],
 						},
 						{
-							code: "NotTxtFile",
 							message: '"copy.json" is not a .txt file',
 							path: ["outputFile"],
 						},
