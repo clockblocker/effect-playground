@@ -182,15 +182,21 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 			content: [
 				{
 					type: "text",
-					text: `Couldn't write "dir.txt": Is a directory`,
+					text: "Is a directory",
 				},
 			],
 			isError: true,
 		});
-		const missing = mcp(join(directory, "missing"));
+		const binary = join(directory, "missing");
+		const missing = mcp(binary);
 		await missing.initialize();
 		expect(await missing.callCustomCat("hello.txt", "copy.txt")).toEqual({
-			content: [{ type: "text", text: "custom_cat can't be found" }],
+			content: [
+				{
+					type: "text",
+					text: `NotFound: ChildProcess.spawn (${binary} --input-file=hello.txt --output-file=copy.txt)`,
+				},
+			],
 			isError: true,
 		});
 	});

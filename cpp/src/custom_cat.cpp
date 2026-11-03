@@ -33,16 +33,13 @@ struct IoFailure {
 	IoFailed failed;
 };
 
-[[noreturn]] void fail(IoOperation operation, const std::string& name,
-						int error) {
-	throw IoFailure{IoFailed{.operation = operation,
-							 .file = name,
-							 .reason = std::generic_category().message(error)}};
+[[noreturn]] void fail(int error) {
+	throw IoFailure{IoFailed{.message = std::generic_category().message(error)}};
 }
 
 std::string read_file(const std::string& name) {
 	const int fd = ::open(in_files(name).c_str(), O_RDONLY | O_CLOEXEC);
-	if (fd < 0) fail(IoOperation::read, name, errno);
+	if (fd < 0) fail(errno);
 	std::string text;
 	char buffer[1 << 16];
 	while (true) {
@@ -52,7 +49,7 @@ std::string read_file(const std::string& name) {
 			if (errno == EINTR) continue;
 			const int error = errno;
 			::close(fd);
-			fail(IoOperation::read, name, error);
+			fail(error);
 		}
 		text.append(buffer, static_cast<std::size_t>(count));
 	}
@@ -75,11 +72,11 @@ void write_file(const std::string& name, const std::string& text) {
 	const auto target = in_files(name);
 	std::string temporary = (files / ".custom_cat-XXXXXX").string();
 	const int fd = ::mkstemp(temporary.data());
-	if (fd < 0) fail(IoOperation::write, name, errno);
+	if (fd < 0) fail(errno);
 	const auto give_up = [&](int error) {
 		::close(fd);
 		::unlink(temporary.c_str());
-		fail(IoOperation::write, name, error);
+		fail(error);
 	};
 	if (::fchmod(fd, mode_for(target)) != 0) give_up(errno);
 	for (std::size_t written = 0; written < text.size();) {
@@ -95,12 +92,12 @@ void write_file(const std::string& name, const std::string& text) {
 	if (::close(fd) != 0) {
 		const int error = errno;
 		::unlink(temporary.c_str());
-		fail(IoOperation::write, name, error);
+		fail(error);
 	}
 	if (::rename(temporary.c_str(), target.c_str()) != 0) {
 		const int error = errno;
 		::unlink(temporary.c_str());
-		fail(IoOperation::write, name, error);
+		fail(error);
 	}
 }
 
@@ -123,15 +120,17 @@ int main(int argc, char* argv[]) {
 	}
 	try {
 		if (auto issues = validate::validate(*request); !issues.empty()) {
-			std::cout << rfl::json::write<Wire>(
-							 Error(InvalidRequest{.issues = std::move(issues)}))
+			std::cout << rfl::json::write<Wire>(CustomCatOutput(
+							 InvalidRequest{.issues = std::move(issues)}))
 					  << "\n";
 			return exit_invalid;
 		}
-		std::cout << rfl::json::write<Wire>(copy(*request)) << "\n";
+		std::cout << rfl::json::write<Wire>(CustomCatOutput(copy(*request)))
+				  << "\n";
 		return 0;
 	} catch (const IoFailure& failure) {
-		std::cout << rfl::json::write<Wire>(Error(failure.failed)) << "\n";
+		std::cout << rfl::json::write<Wire>(CustomCatOutput(failure.failed))
+				  << "\n";
 		return exit_io;
 	} catch (const std::exception& unexpected) {
 		std::cerr << "custom_cat: " << unexpected.what() << "\n";

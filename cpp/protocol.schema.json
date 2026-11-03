@@ -14,11 +14,11 @@
                 "payload": {
                     "$ref": "#/$defs/protocol__CustomCatRequest"
                 },
-                "success": {
-                    "$ref": "#/$defs/protocol__CustomCatSuccess"
-                },
-                "error": {
+                "output": {
                     "anyOf": [
+                        {
+                            "$ref": "#/$defs/protocol__CustomCatSuccess__tagged"
+                        },
                         {
                             "$ref": "#/$defs/protocol__InvalidRequest__tagged"
                         },
@@ -30,8 +30,7 @@
             },
             "required": [
                 "payload",
-                "success",
-                "error"
+                "output"
             ]
         },
         "protocol__CustomCatRequest": {
@@ -85,15 +84,22 @@
                 "outputFile"
             ]
         },
-        "protocol__CustomCatSuccess": {
+        "protocol__CustomCatSuccess__tagged": {
             "type": "object",
             "properties": {
+                "_tag": {
+                    "type": "string",
+                    "enum": [
+                        "Success"
+                    ]
+                },
                 "bytesCopied": {
                     "type": "integer",
                     "description": "How many bytes the output file holds."
                 }
             },
             "required": [
+                "_tag",
                 "bytesCopied"
             ]
         },
@@ -129,28 +135,14 @@
                         "IoFailed"
                     ]
                 },
-                "operation": {
-                    "type": "string",
-                    "description": "What was being done to the file.",
-                    "enum": [
-                        "read",
-                        "write"
-                    ]
-                },
-                "file": {
-                    "type": "string",
-                    "description": "The file, as the request names it."
-                },
-                "reason": {
+                "message": {
                     "type": "string",
                     "description": "What the system said, such as \"Is a directory\"."
                 }
             },
             "required": [
                 "_tag",
-                "operation",
-                "file",
-                "reason"
+                "message"
             ]
         },
         "protocol__Issue": {
@@ -179,11 +171,6 @@
                 "message",
                 "path"
             ]
-        }
-    },
-    "x-errors": {
-        "IoFailed": {
-            "message": "Couldn't {operation} \"{file}\": {reason}"
         }
     }
 }

@@ -9,22 +9,11 @@
 
 import { Schema } from "effect";
 
-/**
- * An error that isn't about a field. Its message: Couldn't {operation}
- * "{file}": {reason}
- */
+/** An error that isn't about a field. */
 export class IoFailed extends Schema.TaggedError<IoFailed>()("IoFailed", {
-	/** What was being done to the file. */
-	operation: Schema.Literals(["read", "write"]),
-	/** The file, as the request names it. */
-	file: Schema.String,
 	/** What the system said, such as "Is a directory". */
-	reason: Schema.String,
-}) {
-	override get message(): string {
-		return `Couldn't ${this.operation} "${this.file}": ${this.reason}`;
-	}
-}
+	message: Schema.String,
+}) {}
 
 /** What the CustomCat method takes, succeeds with and fails with. */
 export namespace CustomCat {
@@ -124,4 +113,12 @@ export namespace CustomCat {
 	/** What CustomCat fails with. */
 	export const Failure = Schema.Union([InvalidRequest, IoFailed]);
 	export type Failure = InvalidRequest | IoFailed;
+
+	/** What CustomCat prints: its success, tagged "Success", or what it fails with. */
+	export const Output = Schema.Union([
+		Schema.TaggedStruct("Success", Success.fields),
+		InvalidRequest,
+		IoFailed,
+	]);
+	export type Output = typeof Output.Type;
 }

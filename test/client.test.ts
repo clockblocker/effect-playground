@@ -73,8 +73,14 @@ describe("Outcome", () => {
 
 	test("shows a failure of what the BFF depends on by its message", () => {
 		expect(
-			failed(Cause.fail(new CliFailed({ reason: { _tag: "NotFound" } }))),
-		).toBe(`<p role="alert">custom_cat can&#x27;t be found</p>`);
+			failed(
+				Cause.fail(
+					new CliFailed({
+						message: "custom_cat timed out after 5000 ms",
+					}),
+				),
+			),
+		).toBe(`<p role="alert">custom_cat timed out after 5000 ms</p>`);
 	});
 
 	test("shows a defect as something gone wrong, and no more, even beside an interruption", () => {

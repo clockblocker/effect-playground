@@ -1,11 +1,5 @@
 import { SchemaRepresentation } from "effect";
-import {
-	type Definition,
-	type ErrorTemplate,
-	type Procedure,
-	type Protocol,
-	placeholder,
-} from "./normalize.ts";
+import type { Definition, Procedure, Protocol } from "./normalize.ts";
 
 /**
  * Writes the Effect Schema module for a normalized protocol: one file named
@@ -15,7 +9,8 @@ import {
  * payload is `Request`, `RequestShape` the same without its checks, and its
  * success `Success`; `Path` lists where in a request an issue can be, `Issue`
  * is a problem there, and `InvalidRequest` holds them. `Failure` is
- * `InvalidRequest` or one of its other errors, such as `IoFailed`. Every
+ * `InvalidRequest` or one of its other errors, such as `IoFailed`, and
+ * `Output` what it prints, the success tagged or a failure. Every
  * other definition only it uses keeps its own name. A definition more than
  * one procedure uses is declared once, before the namespaces, as are the
  * errors besides InvalidRequest.
@@ -30,10 +25,10 @@ export function emit(
 	header: readonly string[],
 ): { readonly file: string; readonly source: string } {
 	const { namespace, procedures, definitions, errors } = protocol;
-	for (const { definition } of errors) {
-		if ((roleNames as readonly string[]).includes(definition.name)) {
+	for (const { name } of errors) {
+		if ((roleNames as readonly string[]).includes(name)) {
 			throw new Error(
-				`${definition.name} would clash with the generated ${definition.name}; rename the struct`,
+				`${name} would clash with the generated ${name}; rename the struct`,
 			);
 		}
 	}
@@ -110,6 +105,7 @@ const roleNames = [
 	"Issue",
 	"InvalidRequest",
 	"Failure",
+	"Output",
 ] as const;
 
 function procedureNamespace(
@@ -188,14 +184,18 @@ function procedureNamespace(
 					`export const Failure = Schema.Union([InvalidRequest, ${procedure.errors.join(", ")}]);`,
 					`export type Failure = InvalidRequest | ${procedure.errors.join(" | ")};`,
 				]),
+		"",
+		`/** What ${procedure.name} prints: its success, tagged ${JSON.stringify(procedure.successTag)}, or what it fails with. */`,
+		`export const Output = Schema.Union([Schema.TaggedStruct(${JSON.stringify(procedure.successTag)}, Success.fields), ${["InvalidRequest", ...procedure.errors].join(", ")}]);`,
+		"export type Output = typeof Output.Type;",
 		"}",
 		"",
 	].join("\n");
 }
 
-/** A `TaggedError` whose message is its C++ template, over its fields. */
+/** A `TaggedError` of its fields; a field `message` is its message. */
 function errorDeclaration(
-	{ definition, message }: ErrorTemplate,
+	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
 ): string {
 	const { name, tag = name } = definition;
@@ -208,14 +208,10 @@ function errorDeclaration(
 		definitions,
 	);
 	return [
-		...jsDoc(`An error that isn't about a field. Its message: ${message}`),
+		"/** An error that isn't about a field. */",
 		`export class ${name} extends Schema.TaggedError<${name}>()(${JSON.stringify(tag)}, {`,
 		...fields,
-		"}) {",
-		"override get message(): string {",
-		`return ${templateCode(message, "this.")};`,
-		"}",
-		"}",
+		"}) {}",
 		"",
 	].join("\n");
 }
@@ -364,20 +360,6 @@ function declare(
 		`export interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
 		"",
 	].join("\n");
-}
-
-/** `Couldn't {operation}` → a template literal over `operation`. */
-function templateCode(template: string, scope = ""): string {
-	const parts = template.split(placeholder);
-	const code = parts.map((part, index) =>
-		index % 2 === 1
-			? `\${${scope}${part}}`
-			: part
-					.replaceAll("\\", "\\\\")
-					.replaceAll("`", "\\`")
-					.replaceAll("${", "\\${"),
-	);
-	return `\`${code.join("")}\``;
 }
 
 function fieldsOf(

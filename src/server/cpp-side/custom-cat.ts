@@ -5,25 +5,27 @@ import {
 	Duration,
 	Effect,
 	Layer,
+	Match,
 	type PlatformError,
 	Schema,
 	Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { CliFailed } from "../../shared/cli-failed.ts";
-import { CustomCat, IoFailed } from "../../shared/generated/protocol.ts";
+import { CustomCat } from "../../shared/generated/protocol.ts";
 
 const root = join(import.meta.dirname, "../../..");
 
-const decodeSuccess = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(CustomCat.Success),
+const decodeOutput = Schema.decodeUnknownEffect(
+	Schema.fromJsonString(CustomCat.Output),
 );
-const decodeInvalidRequest = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(CustomCat.InvalidRequest),
-);
-const decodeIoFailed = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(IoFailed),
-);
+
+// The exit codes whose stdout is an Output, and the tag it must have.
+const outputTags: Partial<Record<number, CustomCat.Output["_tag"]>> = {
+	0: "Success",
+	1: "InvalidRequest",
+	3: "IoFailed",
+};
 
 /**
  * custom_cat's output doesn't match the protocol: the BFF and custom_cat
@@ -43,29 +45,15 @@ export class ContractMismatch extends Data.TaggedError("ContractMismatch")<{
 const text = (stream: Stream.Stream<Uint8Array, unknown>) =>
 	stream.pipe(Stream.decodeText(), Stream.mkString);
 
-const notStarted = (error: PlatformError.PlatformError) => {
-	switch (error.reason._tag) {
-		case "NotFound":
-			return new CliFailed({ reason: { _tag: "NotFound" } });
-		case "PermissionDenied":
-			return new CliFailed({ reason: { _tag: "NotExecutable" } });
-		default:
-			return new CliFailed({
-				reason: { _tag: "NotStarted", error: error.message },
-			});
-	}
-};
+const notStarted = ({ message }: PlatformError.PlatformError) =>
+	new CliFailed({ message });
 
 // The spawner reports an exit by a signal as a PlatformError whose cause
 // names the signal.
 const killed = (error: PlatformError.PlatformError) => {
 	const cause = error.reason.cause;
-	const signal =
-		cause instanceof Error
-			? /signal: '(\w+)'/.exec(cause.message)?.[1]
-			: "";
 	return new CliFailed({
-		reason: { _tag: "Killed", signal: signal || "a signal" },
+		message: cause instanceof Error ? cause.message : error.message,
 	});
 };
 
@@ -73,7 +61,7 @@ interface Options {
 	/** Where custom_cat runs; it copies in its files/. */
 	readonly directory?: string;
 	readonly binary?: string;
-	/** How long a run may take before it's killed and fails as TimedOut. */
+	/** How long a run may take before it's killed and fails as CliFailed. */
 	readonly timeout?: Duration.Input;
 }
 
@@ -137,31 +125,11 @@ export class CustomCatCli extends Context.Service<
 								Effect.andThen(Effect.die(defect)),
 							);
 						};
-						const decoded = <A>(
-							effect: Effect.Effect<A, Schema.SchemaError>,
-						) =>
-							effect.pipe(
-								Effect.catchTag("SchemaError", ({ message }) =>
-									mismatch(message),
-								),
-							);
 
 						switch (exitCode) {
-							case 0:
-								return yield* decoded(decodeSuccess(stdout));
-							case 1:
-								return yield* Effect.fail(
-									yield* decoded(
-										decodeInvalidRequest(stdout),
-									),
-								);
 							case 2:
 								return yield* mismatch(
 									`custom_cat rejected its arguments: ${stderr.trim()}`,
-								);
-							case 3:
-								return yield* Effect.fail(
-									yield* decoded(decodeIoFailed(stdout)),
 								);
 							case 4:
 								return yield* Effect.die(
@@ -169,11 +137,29 @@ export class CustomCatCli extends Context.Service<
 										`custom_cat failed: ${stderr.trim()}`,
 									),
 								);
-							default:
-								return yield* mismatch(
-									`${exitCode} isn't one of custom_cat's exit codes`,
-								);
 						}
+						const tag = outputTags[exitCode];
+						if (tag === undefined) {
+							return yield* mismatch(
+								`${exitCode} isn't one of custom_cat's exit codes`,
+							);
+						}
+						const output = yield* decodeOutput(stdout).pipe(
+							Effect.catchTag("SchemaError", ({ message }) =>
+								mismatch(message),
+							),
+						);
+						if (output._tag !== tag) {
+							return yield* mismatch(
+								`exit ${exitCode} printed ${output._tag}, not ${tag}`,
+							);
+						}
+						return yield* Match.valueTags(output, {
+							Success: ({ bytesCopied }) =>
+								Effect.succeed({ bytesCopied }),
+							InvalidRequest: Effect.fail,
+							IoFailed: Effect.fail,
+						});
 					},
 					Effect.scoped,
 					Effect.timeoutOrElse({
@@ -181,7 +167,7 @@ export class CustomCatCli extends Context.Service<
 						orElse: () =>
 							Effect.fail(
 								new CliFailed({
-									reason: { _tag: "TimedOut", millis },
+									message: `custom_cat timed out after ${millis} ms`,
 								}),
 							),
 					}),

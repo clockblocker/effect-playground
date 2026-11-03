@@ -11,20 +11,16 @@ export interface Definition {
 	readonly tag: string | undefined;
 }
 
-/** A procedure struct, never sent, naming what it takes and returns. */
+/** A procedure struct, never sent, naming what it takes and prints. */
 export interface Procedure {
 	readonly name: string;
 	readonly payload: string;
+	/** The output's first alternative, without its tag. */
 	readonly success: string;
+	/** The success's tag in the output, such as `Success`. */
+	readonly successTag: string;
 	/** What it fails with besides InvalidRequest, such as `IoFailed`. */
 	readonly errors: readonly string[];
-}
-
-/** An error that isn't about a field, such as `IoFailed`. */
-export interface ErrorTemplate {
-	readonly definition: Definition;
-	/** Its message, in which `{field}` stands for that field's value. */
-	readonly message: string;
 }
 
 export interface Protocol {
@@ -36,21 +32,18 @@ export interface Protocol {
 	readonly issue: Definition;
 	readonly invalidRequest: Definition;
 	/** Every procedure's other errors, each once, in order of first use. */
-	readonly errors: readonly ErrorTemplate[];
+	readonly errors: readonly Definition[];
 }
 
 const definitionRef = "#/$defs/";
 const taggedSuffix = "__tagged";
-const errorsKeyword = "x-errors";
-
-/** A `{name}` in a message template; splitting by it alternates text and name. */
-export const placeholder = /\{([^{}]*)\}/g;
 
 /**
  * Fields an error can't have, because every JavaScript `Error` has them: a
- * field `name` would turn `String(error)` into `config.json: …`.
+ * field `name` would turn `String(error)` into `config.json: …`. A field
+ * `message` is the error's message.
  */
-const errorOwnFields = new Set(["name", "message", "stack", "cause"]);
+const errorOwnFields = new Set(["name", "stack", "cause"]);
 
 /**
  * Reads the JSON Schema that reflect-cpp emits for a procedure struct, or
@@ -117,15 +110,21 @@ export function normalize(document: unknown): Protocol {
 	const issue = required(definitions, "Issue");
 	checkInvalidRequest(invalidRequest);
 	checkIssue(issue);
-	const errors = errorTemplates(
-		[...new Set(procedures.flatMap(({ errors }) => errors))].map((name) =>
-			required(definitions, name),
-		),
-		document[errorsKeyword],
+	const errors = [...new Set(procedures.flatMap(({ errors }) => errors))].map(
+		(name) => required(definitions, name),
 	);
+	for (const error of errors) {
+		checkErrorFields(
+			error,
+			Object.keys(properties(error)).filter((field) => field !== "_tag"),
+		);
+	}
+	for (const { success } of procedures) {
+		definitions.set(success, untagged(required(definitions, success)));
+	}
 
 	for (const { name } of procedures) definitions.delete(name);
-	for (const { definition } of errors) definitions.delete(definition.name);
+	for (const { name } of errors) definitions.delete(name);
 	definitions.delete(invalidRequest.name);
 	definitions.delete(issue.name);
 	return {
@@ -140,37 +139,21 @@ export function normalize(document: unknown): Protocol {
 	};
 }
 
-/**
- * The schema's "x-errors": the message template of each error besides
- * InvalidRequest, by tag, whose every `{name}` is one of its fields.
- */
-function errorTemplates(
-	definitions: readonly Definition[],
-	raw: unknown,
-): ErrorTemplate[] {
-	const templates = Predicate.isObject(raw) ? raw : {};
-	return definitions.map((definition) => {
-		const { name, tag } = definition;
-		const entry = templates[tag ?? name];
-		const message = Predicate.isObject(entry) ? entry.message : undefined;
-		if (typeof message !== "string") {
-			throw new Error(
-				`${name} has no message template in "${errorsKeyword}"`,
-			);
-		}
-		const fields = Object.keys(properties(definition)).filter(
-			(field) => field !== "_tag",
-		);
-		checkErrorFields(definition, fields);
-		for (const [, field = ""] of message.matchAll(placeholder)) {
-			if (!fields.includes(field)) {
-				throw new Error(
-					`${name}'s message names {${field}}, which isn't one of its fields`,
-				);
-			}
-		}
-		return { definition, message };
-	});
+/** A tagged alternative as a plain struct: its `_tag` goes. */
+function untagged(definition: Definition): Definition {
+	const { _tag: _, ...rest } = properties(definition);
+	const required = definition.schema.required;
+	return {
+		...definition,
+		schema: {
+			...definition.schema,
+			properties: rest,
+			required: Array.isArray(required)
+				? required.filter((field) => field !== "_tag")
+				: required,
+		},
+		tag: undefined,
+	};
 }
 
 function checkErrorFields(
@@ -209,25 +192,30 @@ function procedure(
 		}
 		return ref.slice(definitionRef.length);
 	};
-	const error = field("error");
+	const output = field("output");
 	const alternatives = (
-		Array.isArray(error.anyOf) ? error.anyOf : [error]
-	).map((alternative) => refName(alternative, "error"));
-	const [first, ...rest] = alternatives;
+		Array.isArray(output.anyOf) ? output.anyOf : [output]
+	).map((alternative) => refName(alternative, "output"));
+	const [success, invalidRequest, ...errors] = alternatives;
+	const successTag =
+		success === undefined ? undefined : definitions.get(success)?.tag;
 	if (
-		first === undefined ||
-		definitions.get(first)?.tag !== "InvalidRequest" ||
-		rest.some((name) => definitions.get(name)?.tag === undefined)
+		success === undefined ||
+		successTag === undefined ||
+		invalidRequest === undefined ||
+		definitions.get(invalidRequest)?.tag !== "InvalidRequest" ||
+		errors.some((name) => definitions.get(name)?.tag === undefined)
 	) {
 		throw new Error(
-			`${name}.error must be rfl::TaggedUnion<"_tag", InvalidRequest, …>: ` +
-				"a field's problems are issues, and every other error is tagged too",
+			`${name}.output must be rfl::TaggedUnion<"_tag", Success, InvalidRequest, …>: ` +
+				"what it prints is its success, its issues or another tagged error",
 		);
 	}
 	return {
 		payload: refName(field("payload"), "payload"),
-		success: refName(field("success"), "success"),
-		errors: rest,
+		success,
+		successTag,
+		errors,
 	};
 }
 

@@ -18,7 +18,7 @@ const invalidName = (message: string) =>
 
 const checkName = Schema.decodeUnknownEffect(ReadFile.Request.fields.name);
 
-// What the system said, as custom_cat's reason is: the errno's message.
+// What the system said, as custom_cat's IoFailed does: the errno's message.
 const systemMessage = (
 	error: Pick<PlatformError.PlatformError, "message" | "reason">,
 ) => {
@@ -84,9 +84,7 @@ export class BffReader extends Context.Service<
 							(_, error) =>
 								Effect.fail(
 									new IoFailed({
-										operation: "read",
-										file: name,
-										reason: systemMessage(error),
+										message: systemMessage(error),
 									}),
 								),
 						),

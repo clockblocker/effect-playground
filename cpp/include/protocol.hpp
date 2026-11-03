@@ -4,10 +4,10 @@
 // `bun run generate`, which writes `cpp/protocol.schema.json` and
 // `src/shared/generated/protocol.ts`.
 //
-// - `Procedures` lists the procedures. A procedure's `payload` and `success`
-//   become `Request` and `Success` in a TypeScript namespace named after it.
-//   Its `error` is InvalidRequest, then any error that isn't about a field,
-//   such as IoFailed, whose `message` template names its fields.
+// - `Procedures` lists the procedures. A procedure's `payload` becomes
+//   `Request` in a TypeScript namespace named after it, and its `output`,
+//   what it prints, `Output`: a tagged union of its success, which becomes
+//   `Success`, InvalidRequest, then any error that isn't about a field.
 // - A field's `rfl::Description` becomes its JSDoc.
 // - A request's field carries its rules in its type, a Checked<…> of
 //   reflect-cpp validators (see checked.hpp). Each failing validator becomes
@@ -20,7 +20,6 @@
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <string>
-#include <string_view>
 #include <system_error>
 #include <tuple>
 #include <variant>
@@ -110,21 +109,13 @@ using FileName = Checked<Name, PlainName, TxtFile>;
 using InFiles = Checked<FileName, NotALink>;
 using Existing = Checked<InFiles, ExistingFile>;
 
-enum class IoOperation { read, write };
-
 // A file couldn't be read or written for a reason that isn't about its name,
 // such as a directory where a file should be, or a read-only disk.
 struct IoFailed {
-	static constexpr std::string_view message =
-		"Couldn't {operation} \"{file}\": {reason}";
-	rfl::Description<"What was being done to the file.", IoOperation> operation;
-	rfl::Description<"The file, as the request names it.", std::string> file;
 	rfl::Description<"What the system said, such as \"Is a directory\".",
 					 std::string>
-		reason;
+		message;
 };
-
-using Error = rfl::TaggedUnion<"_tag", InvalidRequest, IoFailed>;
 
 struct DifferentNames;
 struct DifferentFiles;
@@ -171,14 +162,18 @@ struct DifferentFiles {
 };
 
 struct CustomCatSuccess {
+	using Tag = rfl::Literal<"Success">;
 	rfl::Description<"How many bytes the output file holds.", std::uint64_t>
 		bytes_copied;
 };
 
+// What custom_cat prints, on exit 0, 1 and 3.
+using CustomCatOutput =
+	rfl::TaggedUnion<"_tag", CustomCatSuccess, InvalidRequest, IoFailed>;
+
 struct CustomCat {
 	CustomCatRequest payload;
-	CustomCatSuccess success;
-	Error error;
+	CustomCatOutput output;
 };
 
 using Procedures = std::tuple<CustomCat>;

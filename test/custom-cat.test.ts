@@ -15,13 +15,14 @@ import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 
 // What the BFF decodes custom_cat's stdout with.
-const success = Schema.decodeUnknownSync(
-	Schema.fromJsonString(CustomCat.Success),
+const output = Schema.decodeUnknownSync(
+	Schema.fromJsonString(CustomCat.Output),
 );
-const invalidRequest = Schema.decodeUnknownSync(
-	Schema.fromJsonString(CustomCat.InvalidRequest),
-);
-const ioFailed = Schema.decodeUnknownSync(Schema.fromJsonString(IoFailed));
+const invalidRequest = (stdout: string) => {
+	const decoded = output(stdout);
+	expect(decoded).toBeInstanceOf(CustomCat.InvalidRequest);
+	return decoded as CustomCat.InvalidRequest;
+};
 
 let directory = "";
 
@@ -74,7 +75,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=copy.txt",
 		]);
 		expect(result).toEqual({
-			stdout: '{"bytesCopied":6}\n',
+			stdout: '{"_tag":"Success","bytesCopied":6}\n',
 			stderr: "",
 			exitCode: 0,
 		});
@@ -87,7 +88,10 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			{ "hello.txt": "Hello\n", "copy.txt": "something much longer\n" },
 		);
 		expect(result.exitCode).toBe(0);
-		expect(success(result.stdout)).toEqual({ bytesCopied: 6 });
+		expect(output(result.stdout)).toEqual({
+			_tag: "Success",
+			bytesCopied: 6,
+		});
 		expect(await file("copy.txt").text()).toBe("Hello\n");
 	});
 
@@ -197,11 +201,11 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(again).toEqual({
-			stdout: '{"_tag":"IoFailed","operation":"read","file":"dir.txt","reason":"Is a directory"}\n',
+			stdout: '{"_tag":"IoFailed","message":"Is a directory"}\n',
 			stderr: "",
 			exitCode: 3,
 		});
-		expect(ioFailed(again.stdout)).toBeInstanceOf(IoFailed);
+		expect(output(again.stdout)).toBeInstanceOf(IoFailed);
 	});
 
 	test("refuses to copy a file onto itself", async () => {
@@ -302,12 +306,8 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=copy.txt",
 		]);
 		expect(failed.exitCode).toBe(3);
-		expect(ioFailed(failed.stdout)).toEqual(
-			new IoFailed({
-				operation: "write",
-				file: "copy.txt",
-				reason: "Permission denied",
-			}),
+		expect(output(failed.stdout)).toEqual(
+			new IoFailed({ message: "Permission denied" }),
 		);
 		expect(await file("copy.txt").text()).toBe("Old\n");
 	});
@@ -320,12 +320,8 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=out.txt",
 		]);
 		expect(failed.exitCode).toBe(3);
-		expect(ioFailed(failed.stdout)).toEqual(
-			new IoFailed({
-				operation: "write",
-				file: "out.txt",
-				reason: "Is a directory",
-			}),
+		expect(output(failed.stdout)).toEqual(
+			new IoFailed({ message: "Is a directory" }),
 		);
 		expect(readdirSync(join(directory, "files")).sort()).toEqual([
 			"hello.txt",

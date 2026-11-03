@@ -132,11 +132,7 @@ describe("BffReader in a files/ of its own", () => {
 		const result = await readScratch("dir.txt");
 		expect(result).toEqual(
 			Result.fail(
-				new IoFailed({
-					operation: "read",
-					file: "dir.txt",
-					reason: "illegal operation on a directory",
-				}),
+				new IoFailed({ message: "illegal operation on a directory" }),
 			),
 		);
 	});
@@ -249,9 +245,7 @@ describe("REST", () => {
 		expect(status).toBe(500);
 		expect(JSON.parse(body)).toEqual({
 			_tag: "IoFailed",
-			operation: "read",
-			file: "dir.txt",
-			reason: "illegal operation on a directory",
+			message: "illegal operation on a directory",
 		});
 		expect(
 			(await copy({ inputFile: "dir.txt", outputFile: "copy.txt" }))
@@ -260,14 +254,15 @@ describe("REST", () => {
 	});
 
 	test("answers CliFailed with 503 and its JSON", async () => {
-		const { status, body } = await rest(join(scratch, "missing")).copy({
+		const binary = join(scratch, "missing");
+		const { status, body } = await rest(binary).copy({
 			inputFile: "hello.txt",
 			outputFile: "copy.txt",
 		});
 		expect(status).toBe(503);
 		expect(JSON.parse(body)).toEqual({
 			_tag: "CliFailed",
-			reason: { _tag: "NotFound" },
+			message: `NotFound: ChildProcess.spawn (${binary} --input-file=hello.txt --output-file=copy.txt)`,
 		});
 	});
 

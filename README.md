@@ -24,7 +24,8 @@ An issue's `message` is whatever checked the rule says, as it says it: a
 reflect-cpp validator's error in `custom_cat`, Effect Schema's message in
 the page and the BFF, or the system's error for a file that doesn't exist.
 Where nothing says anything, the check has a plain literal. There are no
-message templates and no rule codes.
+message templates and no rule codes, and the errors that aren't issues
+follow the same rule.
 
 Who checks the rules depends on the method:
 
@@ -62,16 +63,21 @@ error channel), a `Die` (a defect) or an `Interrupt`.
 
 - `IoFailed` is a read or write that failed for a reason that isn't about a
   name, such as a directory named `x.txt` or a read-only `files/`:
-  `{ operation, file, reason }`, read as
-  `Couldn't write "x.txt": Is a directory`. It's declared in the C++
-  protocol, which both `custom_cat` and the BFF's reader produce.
-- `CliFailed` is the BFF failing to run `custom_cat` to its end: its
-  `reason` is `NotFound`, `NotExecutable`, `NotStarted`, `Killed` (with the
-  signal) or `TimedOut` (after five seconds, by default). Only the BFF sees
-  it, so it's declared in TS, in `src/shared/cli-failed.ts`.
+  `{ message }`, what the system said about the errno. `custom_cat` says
+  `Is a directory` (`std::generic_category()`), and the BFF's reader
+  `illegal operation on a directory` (`getSystemErrorMessage`). It's
+  declared in the C++ protocol, which both produce.
+- `CliFailed` is the BFF failing to run `custom_cat` to its end:
+  `{ message }`. It's the spawner's own message when `custom_cat` doesn't
+  start, such as
+  `NotFound: ChildProcess.spawn (…/custom_cat --input-file=… --output-file=…)`,
+  the signal's when it's killed,
+  `Process interrupted due to receipt of signal: 'SIGKILL'`, and
+  `custom_cat timed out after 5000 ms` after five seconds, by default. Only
+  the BFF sees it, so it's declared in TS, in `src/shared/cli-failed.ts`.
 - `ContractMismatch` is the BFF and `custom_cat` disagreeing: output that
-  doesn't decode, an exit code whose output belongs to another, a usage
-  error (the BFF built the flags) or an exit code `custom_cat` doesn't have.
+  doesn't decode, output whose tag isn't its exit code's, a usage error
+  (the BFF built the flags) or an exit code `custom_cat` doesn't have.
   It carries the exit code, stdout, stderr and the issue, and the BFF logs
   it where it happens. It stays a defect: no caller can act on it.
 - A timeout is `CliFailed` to the caller; inside `CustomCatCli` it
@@ -188,22 +194,26 @@ Its flags are the fields of `CustomCatRequest`, which reflect-cpp's CLI
 reader (`rfl/cli.hpp`) spells in kebab-case. Both names follow the read's
 rules, and only the input must exist. What it prints, and its exit codes:
 
-- 0, copied: stdout is `{"bytesCopied":18}`.
+- 0, copied: stdout is `{"_tag":"Success","bytesCopied":18}`.
 - 1, a field is wrong, or missing: stdout is the `InvalidRequest`, with
   every issue, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["inputFile"]},{"message":"String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["outputFile"]}]}`.
 - 2, a usage error that names no field, such as an unknown flag:
   reflect-cpp's error, on stderr.
 - 3, a file couldn't be read or written: stdout is the `IoFailed`, such as
-  `{"_tag":"IoFailed","operation":"read","file":"dir.txt","reason":"Is a directory"}`.
+  `{"_tag":"IoFailed","message":"Is a directory"}`.
 - 4, anything else, which would be a bug in `custom_cat`: on stderr.
 
-stdout is JSON in the generated schemas' wire form: `CustomCat.Success` on
-0, `CustomCat.InvalidRequest` on 1 and `IoFailed` on 3. The BFF's
-`CustomCatCli` runs it with Effect's `ChildProcess`, in a scope whose end
-kills it (`SIGTERM`, then `SIGKILL` a second later), and decodes stdout with
-those schemas, into a success or a typed failure. Exit 4 is a defect; exit
-2, any other code, or output that doesn't decode is a `ContractMismatch`.
+stdout, on 0, 1 and 3, is one `CustomCatOutput`, a tagged union declared in
+C++, which is `CustomCat.Output` in TS: `Success`, `InvalidRequest` or
+`IoFailed`. The BFF's `CustomCatCli` runs it with Effect's `ChildProcess`, in
+a scope whose end kills it (`SIGTERM`, then `SIGKILL` a second later),
+decodes stdout once with `CustomCat.Output`, checks that its tag is its
+exit code's, and dispatches with `Match.valueTags`: `Success` succeeds with
+`{ bytesCopied }`, without its tag, and the others fail. A new kind of
+output in C++ doesn't compile in the BFF until it's handled. Exit 4 is a
+defect; exit 2, any other code, output that doesn't decode, or a tag that
+isn't its exit code's is a `ContractMismatch`.
 `CustomCatCli.layerWith({ directory, binary, timeout })` sets where it runs,
 which executable it runs and how long it may take; the tests point `binary`
 at shell scripts.
@@ -211,10 +221,11 @@ at shell scripts.
 ## The protocol
 
 The C++ structs in `cpp/include/protocol.hpp` define `CustomCat`'s request
-and success, which `custom_cat` runs. `Procedures` lists the procedures,
-`CustomCat` alone. A procedure fails with `InvalidRequest`, a list of
-`Issue`s, which are structs there too, or with `IoFailed`, whose static
-`message` is a template over its fields. Fields are snake_case in C++ and
+and output, which `custom_cat` takes and prints. `Procedures` lists the
+procedures, `CustomCat` alone. A procedure's `output` is a tagged union of
+its success, whose `using Tag = rfl::Literal<"Success">` names it,
+`InvalidRequest`, a list of `Issue`s, which are structs there too, and
+`IoFailed`, whose one field is its `message`. Fields are snake_case in C++ and
 camelCase in JSON, through reflect-cpp's `SnakeCaseToCamelCase`
 (`protocol::Wire`).
 
@@ -291,12 +302,12 @@ it on.
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
    keyword: `rfl::Size` `minLength` or `maxLength`, a `PatternValidator` a
-   `pattern`; `NotALink` and `ExistingFile` have none. The tool adds
-   `x-errors`, the template of each error besides `InvalidRequest`.
+   `pattern`; `NotALink` and `ExistingFile` have none.
 2. `scripts/generate.ts` turns that into Effect Schema in one module,
    `src/shared/generated/protocol.ts`: a TypeScript namespace per method,
-   named after it, `CustomCat`. In it, `Request` and `Success` are the
-   payload and the success, and `RequestShape` is `Request` without its
+   named after it, `CustomCat`. In it, `Request` is the payload, `Success`
+   the output's first alternative without its tag, `Output` the whole union,
+   with the success tagged, and `RequestShape` is `Request` without its
    checks, nested structs inlined. Each keyword becomes Effect's check, with
    Effect's own message: `Schema.isMinCodePoints(5)`,
    `Schema.isPattern(/^.+\.txt$/u)`. `Path` is the union of every field's
@@ -306,8 +317,8 @@ it on.
    `Schema.TaggedError` with a non-empty `issues`, whose `message` joins
    theirs. `Failure` is `InvalidRequest` or `IoFailed` (`Failure`, because
    an `Error` there would shadow the global one). `IoFailed` is declared
-   once, before the namespaces, a `Schema.TaggedError` whose `message` fills
-   in its template. Each name is both the schema and its type, so
+   once, before the namespaces, a `Schema.TaggedError` of its fields, whose
+   `message` field is its message. Each name is both the schema and its type, so
    `CustomCat.Success` works in either position, and TypeScript 7 hovers read
    `CustomCat.Success`.
 3. The page's copy form validates with `CustomCat.Request`; the RPC payload,
@@ -337,8 +348,9 @@ re-emits the schema and regenerates the TypeScript. Both outputs are
 committed. `bun run generate:check` fails if either is stale, or if
 `src/shared/generated/` holds a file the generator no longer writes. The
 generator fails on an Issue with more than `message` and `path`, on an
-error's template that names anything but its fields, and on an error's
-field that would shadow the `Error`'s own, such as `message`.
+output that isn't a tagged success, then `InvalidRequest`, then tagged
+errors, and on an error's field that would shadow the `Error`'s own, such as
+`name`.
 
 ## Checks
 

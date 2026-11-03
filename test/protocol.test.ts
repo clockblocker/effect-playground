@@ -108,25 +108,36 @@ describe("generated protocol", () => {
 		).toThrow();
 	});
 
-	test("IoFailed decodes into its class, whose message is its C++ template", () => {
+	test("IoFailed decodes into its class, whose message is the system's", () => {
 		const wireForm = {
 			_tag: "IoFailed",
-			operation: "write",
-			file: "x.txt",
-			reason: "Read-only file system",
+			message: "Read-only file system",
 		} as const;
 		const failed = Schema.decodeUnknownSync(CustomCat.Failure)(wireForm);
 		expect(failed).toBeInstanceOf(IoFailed);
-		expect(failed.message).toBe(
-			`Couldn't write "x.txt": Read-only file system`,
-		);
+		expect(failed.message).toBe("Read-only file system");
+		expect(String(failed)).toBe("IoFailed: Read-only file system");
 		expect(Schema.encodeSync(CustomCat.Failure)(failed)).toEqual(wireForm);
 		expect(() =>
-			Schema.decodeUnknownSync(IoFailed)({
-				...wireForm,
-				operation: "delete",
-			}),
+			Schema.decodeUnknownSync(IoFailed)({ _tag: "IoFailed" }),
 		).toThrow();
+	});
+
+	test("Output is what custom_cat prints, each kind by its tag", () => {
+		const decode = Schema.decodeUnknownSync(
+			Schema.fromJsonString(CustomCat.Output),
+		);
+		expect(decode('{"_tag":"Success","bytesCopied":6}')).toEqual({
+			_tag: "Success",
+			bytesCopied: 6,
+		});
+		expect(decode(JSON.stringify(wire.invalidRequest))).toBeInstanceOf(
+			CustomCat.InvalidRequest,
+		);
+		expect(
+			decode('{"_tag":"IoFailed","message":"Is a directory"}'),
+		).toBeInstanceOf(IoFailed);
+		expect(() => decode('{"bytesCopied":6}')).toThrow();
 	});
 
 	test("an issue's path is one of its method's fields, or the whole request", () => {
@@ -205,15 +216,15 @@ function fixture() {
 		type: "object",
 		properties: {
 			payload: { $ref: `#/$defs/a__${payload}` },
-			success: { $ref: `#/$defs/a__${success}` },
-			error: {
+			output: {
 				anyOf: [
+					{ $ref: `#/$defs/a__${success}__tagged` },
 					{ $ref: "#/$defs/a__InvalidRequest__tagged" },
 					{ $ref: "#/$defs/a__Busy__tagged" },
 				],
 			},
 		},
-		required: ["payload", "success", "error"],
+		required: ["payload", "output"],
 	});
 	return {
 		type: "array",
@@ -247,10 +258,13 @@ function fixture() {
 				},
 				required: ["input", "output"],
 			},
-			a__b__Found: {
+			a__b__Found__tagged: {
 				type: "object",
-				properties: { count: { type: "integer" } },
-				required: ["count"],
+				properties: {
+					_tag: { type: "string", enum: ["Success"] },
+					count: { type: "integer" },
+				},
+				required: ["_tag", "count"],
 			},
 			a__Issue: {
 				type: "object",
@@ -269,10 +283,10 @@ function fixture() {
 				type: "object",
 				properties: {
 					_tag: { type: "string", enum: ["Busy"] },
-					what: { type: "string", description: "What is busy." },
+					message: { type: "string", description: "What is busy." },
 					seconds: { type: "integer" },
 				},
-				required: ["_tag", "what", "seconds"],
+				required: ["_tag", "message", "seconds"],
 			},
 			a__InvalidRequest__tagged: {
 				type: "object",
@@ -286,9 +300,6 @@ function fixture() {
 				},
 				required: ["_tag", "issues"],
 			},
-		} as Record<string, Record<string, unknown>>,
-		"x-errors": {
-			Busy: { message: "{what} is busy for {seconds}s" },
 		} as Record<string, Record<string, unknown>>,
 	};
 }
@@ -405,7 +416,7 @@ describe("emitter", () => {
 		);
 	});
 
-	test("declares each other error once, its message its template", async () => {
+	test("declares each other error once, a field message its message", async () => {
 		const source = emitted(fixture());
 		expect(source.match(/export class Busy /g)).toHaveLength(1);
 		expect(source.indexOf("export class Busy ")).toBeLessThan(
@@ -414,46 +425,48 @@ describe("emitter", () => {
 		const { Busy, Get } = await load(fixture());
 		const busy = Schema.decodeUnknownSync(Get.Failure)({
 			_tag: "Busy",
-			what: "disk",
+			message: "the disk is busy",
 			seconds: 3,
 		});
 		expect(busy).toBeInstanceOf(Busy);
-		expect(busy.message).toBe("disk is busy for 3s");
+		expect(busy.message).toBe("the disk is busy");
 	});
 
-	test("rejects an error without a template, or whose template names no field", () => {
-		const document = fixture();
-		document["x-errors"].Busy = { message: "{who} is busy" };
-		expect(() => normalize(document)).toThrow(
-			"Busy's message names {who}, which isn't one of its fields",
+	test("writes Output, the success tagged, or a failure", async () => {
+		expect(emitted(fixture())).toContain(
+			'export const Output = Schema.Union([Schema.TaggedStruct("Success", Success.fields), InvalidRequest, Busy]);',
 		);
-		delete document["x-errors"].Busy;
-		expect(() => normalize(document)).toThrow(
-			'Busy has no message template in "x-errors"',
-		);
+		const { Get } = await load(fixture());
+		const decode = Schema.decodeUnknownSync(Get.Output);
+		expect(decode({ _tag: "Success", count: 2 })).toEqual({
+			_tag: "Success",
+			count: 2,
+		});
+		expect(() => decode({ count: 2 })).toThrow();
+		expect(Schema.is(Get.Success)({ count: 2 })).toBe(true);
 	});
 
 	test("rejects an error field that would shadow Error's own", () => {
 		const document = fixture();
 		Object.assign(document.$defs.a__Busy__tagged?.properties as object, {
-			message: { type: "string" },
+			name: { type: "string" },
 		});
 		expect(() => normalize(document)).toThrow(
-			"Busy.message would shadow Error.message; rename the field",
+			"Busy.name would shadow Error.name; rename the field",
 		);
 	});
 
-	test("rejects an error other than InvalidRequest", () => {
+	test("rejects an output that isn't a success, then InvalidRequest, then tagged errors", () => {
 		const document = fixture();
 		document.$defs.a__b__Get = {
 			...document.$defs.a__b__Get,
 			properties: {
 				...(document.$defs.a__b__Get?.properties as object),
-				error: { $ref: "#/$defs/a__b__Found" },
+				output: { $ref: "#/$defs/a__b__Found__tagged" },
 			},
 		};
 		expect(() => normalize(document)).toThrow(
-			'Get.error must be rfl::TaggedUnion<"_tag", InvalidRequest, …>',
+			'Get.output must be rfl::TaggedUnion<"_tag", Success, InvalidRequest, …>',
 		);
 	});
 
@@ -461,10 +474,10 @@ describe("emitter", () => {
 		const document = fixture();
 		Object.assign(
 			document.$defs.a__InvalidRequest__tagged?.properties as object,
-			{ message: { type: "string" } },
+			{ name: { type: "string" } },
 		);
 		expect(() => normalize(document)).toThrow(
-			"InvalidRequest.message would shadow Error.message; rename the field",
+			"InvalidRequest.name would shadow Error.name; rename the field",
 		);
 	});
 
@@ -484,7 +497,7 @@ describe("emitter", () => {
 	test("fails on a struct that refers to the success by its C++ name", () => {
 		const document = fixture();
 		Object.assign(document.$defs.a__b__Pair?.properties as object, {
-			found: { $ref: "#/$defs/a__b__Found" },
+			found: { $ref: "#/$defs/a__b__Found__tagged" },
 		});
 		expect(() => emitted(document)).toThrow(
 			"Pair refers to Found, which Get declares as Success",
@@ -496,12 +509,19 @@ describe("emitter, for methods that share a struct", () => {
 	const shared = () => {
 		const document = fixture();
 		document.prefixItems.push({ $ref: "#/$defs/a__b__Put" });
+		const get = document.$defs.a__b__Get?.properties as {
+			output: { anyOf: object[] };
+		};
 		document.$defs.a__b__Put = {
 			...document.$defs.a__b__Get,
 			properties: {
-				...(document.$defs.a__b__Get?.properties as object),
 				payload: { $ref: "#/$defs/a__b__Item" },
-				success: { $ref: "#/$defs/a__b__Stored" },
+				output: {
+					anyOf: [
+						{ $ref: "#/$defs/a__b__Stored__tagged" },
+						...get.output.anyOf.slice(1),
+					],
+				},
 			},
 		};
 		document.$defs.a__b__Item = {
@@ -509,10 +529,13 @@ describe("emitter, for methods that share a struct", () => {
 			properties: { pair: { $ref: "#/$defs/a__b__Pair" } },
 			required: ["pair"],
 		};
-		document.$defs.a__b__Stored = {
+		document.$defs.a__b__Stored__tagged = {
 			type: "object",
-			properties: { id: { type: "string" } },
-			required: ["id"],
+			properties: {
+				_tag: { type: "string", enum: ["Success"] },
+				id: { type: "string" },
+			},
+			required: ["_tag", "id"],
 		};
 		return document;
 	};

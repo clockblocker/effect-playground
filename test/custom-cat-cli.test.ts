@@ -39,6 +39,7 @@ const run = (
 	);
 
 const request = { inputFile: "hello.txt", outputFile: "copy.txt" };
+const flags = "--input-file=hello.txt --output-file=copy.txt";
 
 /** An executable shell script in the test's directory, standing in for custom_cat. */
 async function script(name: string, body: string) {
@@ -130,26 +131,23 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 			outputFile: "copy.txt",
 		});
 		expect(result).toEqual(
-			Result.fail(
-				new IoFailed({
-					operation: "read",
-					file: "dir.txt",
-					reason: "Is a directory",
-				}),
-			),
+			Result.fail(new IoFailed({ message: "Is a directory" })),
 		);
 		expect(Result.isFailure(result) && result.failure.message).toBe(
-			`Couldn't read "dir.txt": Is a directory`,
+			"Is a directory",
 		);
 	});
 
 	describe("fails with CliFailed when custom_cat", () => {
 		test("isn't there", async () => {
-			const result = await run(request, {
-				binary: join(directory, "missing"),
-			});
+			const binary = join(directory, "missing");
+			const result = await run(request, { binary });
 			expect(result).toEqual(
-				Result.fail(new CliFailed({ reason: { _tag: "NotFound" } })),
+				Result.fail(
+					new CliFailed({
+						message: `NotFound: ChildProcess.spawn (${binary} ${flags})`,
+					}),
+				),
 			);
 		});
 
@@ -159,7 +157,9 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 			const result = await run(request, { binary });
 			expect(result).toEqual(
 				Result.fail(
-					new CliFailed({ reason: { _tag: "NotExecutable" } }),
+					new CliFailed({
+						message: `PermissionDenied: ChildProcess.spawn (${binary} ${flags})`,
+					}),
 				),
 			);
 		});
@@ -167,15 +167,11 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 		test("is killed by a signal", async () => {
 			const binary = await script("killed", "kill -9 $$");
 			const result = await run(request, { binary });
-			expect(result).toEqual(
-				Result.fail(
-					new CliFailed({
-						reason: { _tag: "Killed", signal: "SIGKILL" },
-					}),
-				),
-			);
 			expect(Result.isFailure(result) && result.failure.message).toBe(
-				"custom_cat was killed by SIGKILL",
+				"Process interrupted due to receipt of signal: 'SIGKILL'",
+			);
+			expect(Result.isFailure(result) && result.failure).toBeInstanceOf(
+				CliFailed,
 			);
 		});
 
@@ -191,12 +187,9 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 			expect(result).toEqual(
 				Result.fail(
 					new CliFailed({
-						reason: { _tag: "TimedOut", millis: 1000 },
+						message: "custom_cat timed out after 1000 ms",
 					}),
 				),
-			);
-			expect(Result.isFailure(result) && result.failure.message).toBe(
-				"custom_cat didn't finish within 1s",
 			);
 			expect(await goneSoon(pid)).toBe(true);
 		});
@@ -272,10 +265,29 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 
 		test("prints another exit code's output", async () => {
 			const defect = mismatchOf(
-				(await runScript("swapped", `echo '{"bytesCopied":6}'\nexit 1`))
-					.exit,
+				(
+					await runScript(
+						"swapped",
+						`echo '{"_tag":"Success","bytesCopied":6}'\nexit 1`,
+					)
+				).exit,
 			);
 			expect(defect.exitCode).toBe(1);
+			expect(defect.issue).toBe(
+				"exit 1 printed Success, not InvalidRequest",
+			);
+		});
+
+		test("prints a success without its tag", async () => {
+			const defect = mismatchOf(
+				(
+					await runScript(
+						"untagged",
+						`echo '{"bytesCopied":6}'\nexit 0`,
+					)
+				).exit,
+			);
+			expect(defect.exitCode).toBe(0);
 		});
 
 		test("rejects its arguments", async () => {
