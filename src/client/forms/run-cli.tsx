@@ -1,15 +1,9 @@
 import { useAtom } from "@effect/atom-react";
+import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { CustomCat } from "../../shared/generated/protocol.ts";
-import { BffRpcClient } from "../clients.ts";
-import {
-	Outcome,
-	setFailure,
-	TextField,
-	useSchemaResolver,
-} from "./shared.tsx";
-
-const customCat = BffRpcClient.mutation("CustomCat");
+import { customCat } from "../clients.ts";
+import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 
 export function RunCliForm({
 	schema,
@@ -29,7 +23,16 @@ export function RunCliForm({
 	const [result, run] = useAtom(customCat, { mode: "promiseExit" });
 
 	const submit = handleSubmit(async (payload) => {
-		setFailure(await run({ payload }), setError);
+		const failure = Exit.findErrorOption(await run({ payload }));
+		if (Option.isSome(failure)) {
+			Match.valueTags(failure.value, {
+				InvalidRequest: ({ issues }) => setIssues(issues, setError),
+				// Outcome shows these.
+				IoFailed: () => undefined,
+				CliFailed: () => undefined,
+				RpcClientError: () => undefined,
+			});
+		}
 	});
 
 	return (
@@ -49,7 +52,7 @@ export function RunCliForm({
 					Copy
 				</button>
 			</form>
-			<Outcome result={result} error={errors.root?.server}>
+			<Outcome result={result}>
 				{({ bytesCopied }) => <p>Copied {bytesCopied} bytes.</p>}
 			</Outcome>
 		</section>

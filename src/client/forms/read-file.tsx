@@ -1,15 +1,9 @@
 import { useAtom } from "@effect/atom-react";
+import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { ReadFile } from "../../shared/generated/protocol.ts";
-import { BffRpcClient } from "../clients.ts";
-import {
-	Outcome,
-	setFailure,
-	TextField,
-	useSchemaResolver,
-} from "./shared.tsx";
-
-const readFile = BffRpcClient.mutation("ReadFile");
+import { readFile } from "../clients.ts";
+import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 
 export function ReadFileForm({
 	schema,
@@ -30,7 +24,15 @@ export function ReadFileForm({
 
 	// Runs only once the values pass the schema, so a bad name sends nothing.
 	const submit = handleSubmit(async (payload) => {
-		setFailure(await read({ payload }), setError);
+		const failure = Exit.findErrorOption(await read({ payload }));
+		if (Option.isSome(failure)) {
+			Match.valueTags(failure.value, {
+				InvalidRequest: ({ issues }) => setIssues(issues, setError),
+				// Outcome shows these.
+				IoFailed: () => undefined,
+				RpcClientError: () => undefined,
+			});
+		}
 	});
 
 	return (
@@ -45,7 +47,7 @@ export function ReadFileForm({
 					Submit
 				</button>
 			</form>
-			<Outcome result={result} error={errors.root?.server}>
+			<Outcome result={result}>
 				{({ contents }) => <pre>{contents}</pre>}
 			</Outcome>
 		</section>

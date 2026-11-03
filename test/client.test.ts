@@ -1,91 +1,131 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Exit } from "effect";
+import { Cause, Match } from "effect";
 import { HttpClientError, HttpClientRequest } from "effect/http";
+import { AsyncResult } from "effect/reactivity";
 import { RpcClientError } from "effect/rpc";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { ErrorOption } from "react-hook-form";
-import { setFailure } from "../src/client/forms/shared.tsx";
+import {
+	type FormFailure,
+	Outcome,
+	setIssues,
+} from "../src/client/forms/shared.tsx";
 import { CliFailed } from "../src/shared/cli-failed.ts";
 import { CustomCat } from "../src/shared/generated/protocol.ts";
 
-type Submitted = Exit.Exit<
-	CustomCat.Success,
-	CustomCat.Failure | CliFailed | RpcClientError.RpcClientError
->;
+type Result = AsyncResult.AsyncResult<CustomCat.Success, FormFailure>;
 
-/** What setFailure puts on the form, field by field. */
-function errorsOf(exit: Submitted) {
-	const errors: Array<[string, ErrorOption]> = [];
-	setFailure(exit, (name, error) => errors.push([name, error]));
-	return errors;
-}
+/** What Outcome renders for a copy's result. */
+const shown = (result: Result) =>
+	renderToStaticMarkup(
+		createElement(Outcome<CustomCat.Success>, {
+			result,
+			children: ({ bytesCopied }) => `Copied ${bytesCopied} bytes.`,
+		}),
+	);
 
-describe("setFailure", () => {
-	test("puts nothing on the form for a success or an interruption", () => {
-		expect(errorsOf(Exit.succeed({ bytesCopied: 6 }))).toEqual([]);
-		expect(errorsOf(Exit.failCause(Cause.interrupt(1)))).toEqual([]);
-	});
+const failed = (cause: Cause.Cause<FormFailure>) =>
+	shown(AsyncResult.failure(cause));
 
-	test("puts the first issue of each field under it", () => {
-		const exit = Exit.fail(
-			new CustomCat.InvalidRequest({
-				issues: [
-					{
-						message: "first",
-						path: ["outputFile"],
-					},
-					{
-						message: "second",
-						path: ["outputFile"],
-					},
-					{
-						message: "Required",
-						path: ["inputFile"],
-					},
-				],
-			}),
-		);
-		expect(errorsOf(exit)).toEqual([
-			["outputFile", { type: "server", message: "first" }],
-			["inputFile", { type: "server", message: "Required" }],
-		]);
-	});
+const invalid = new CustomCat.InvalidRequest({
+	issues: [
+		{ message: "first", path: ["outputFile"] },
+		{ message: "second", path: ["outputFile"] },
+		{ message: "Required", path: ["inputFile"] },
+	],
+});
 
-	test("shows a failure of what the BFF depends on by its message", () => {
-		const exit = Exit.fail(new CliFailed({ reason: { _tag: "NotFound" } }));
-		expect(errorsOf(exit)).toEqual([
-			["root.server", { message: "custom_cat can't be found" }],
-		]);
-	});
-
-	test("shows a defect as something gone wrong, and no more", () => {
-		const exit = Exit.die(new Error("custom_cat failed: secret"));
-		expect(errorsOf(exit)).toEqual([
-			["root.server", { message: "Something went wrong." }],
-		]);
-	});
-
-	test("words a transport error by its cause", () => {
-		const failed = new HttpClientError.HttpClientError({
+const transport = new RpcClientError.RpcClientError({
+	reason: HttpClientError.HttpClientErrorSchema.fromHttpClientError(
+		new HttpClientError.HttpClientError({
 			reason: new HttpClientError.TransportError({
 				request: HttpClientRequest.post("http://127.0.0.1:5200/rpc"),
 				cause: new TypeError("fetch failed"),
 			}),
-		});
-		const exit = Exit.fail(
-			new RpcClientError.RpcClientError({
-				reason: HttpClientError.HttpClientErrorSchema.fromHttpClientError(
-					failed,
-				),
-			}),
-		);
-		expect(errorsOf(exit)).toEqual([
-			[
-				"root.server",
-				{
-					message:
-						"Request failed: Transport error (POST http://127.0.0.1:5200/rpc)",
-				},
-			],
+		}),
+	),
+});
+
+describe("setIssues", () => {
+	test("puts the first issue of each field under it", () => {
+		const errors: Array<[string, ErrorOption]> = [];
+		setIssues(invalid.issues, (name, error) => errors.push([name, error]));
+		expect(errors).toEqual([
+			["outputFile", { type: "server", message: "first" }],
+			["inputFile", { type: "server", message: "Required" }],
 		]);
 	});
+});
+
+describe("Outcome", () => {
+	test("shows the success, and nothing before one", () => {
+		expect(shown(AsyncResult.success({ bytesCopied: 6 }))).toBe(
+			"Copied 6 bytes.",
+		);
+		expect(shown(AsyncResult.initial())).toBe("");
+	});
+
+	test("shows nothing for an interruption, or an InvalidRequest, whose issues go under the fields", () => {
+		expect(failed(Cause.interrupt(1))).toBe("");
+		expect(failed(Cause.fail(invalid))).toBe("");
+	});
+
+	test("shows a failure of what the BFF depends on by its message", () => {
+		expect(
+			failed(Cause.fail(new CliFailed({ reason: { _tag: "NotFound" } }))),
+		).toBe(`<p role="alert">custom_cat can&#x27;t be found</p>`);
+	});
+
+	test("shows a defect as something gone wrong, and no more, even beside an interruption", () => {
+		const defect = Cause.die(new Error("custom_cat failed: secret"));
+		expect(failed(defect)).toBe(
+			`<p role="alert">Something went wrong.</p>`,
+		);
+		expect(failed(Cause.combine(defect, Cause.interrupt(1)))).toBe(
+			`<p role="alert">Something went wrong.</p>`,
+		);
+	});
+
+	test("words a transport error by its cause", () => {
+		expect(failed(Cause.fail(transport))).toBe(
+			`<p role="alert">Request failed: Transport error (POST http://127.0.0.1:5200/rpc)</p>`,
+		);
+	});
+
+	test("hides a failure while the next submit waits, but keeps a success", () => {
+		expect(
+			shown(
+				AsyncResult.failure(Cause.fail(transport), { waiting: true }),
+			),
+		).toBe("");
+		expect(
+			shown(AsyncResult.success({ bytesCopied: 6 }, { waiting: true })),
+		).toBe("Copied 6 bytes.");
+	});
+});
+
+// Checked by `bun run check`: a handler too few, CliFailed's, and neither
+// matcher compiles.
+const rendered = (result: Result) =>
+	AsyncResult.builder(result)
+		.onInitial(() => "")
+		.onSuccess(() => "")
+		.onErrorTag("InvalidRequest", () => "")
+		.onErrorTag("IoFailed", () => "")
+		.onErrorTag("RpcClientError", () => "")
+		.onDefect(() => "")
+		.onInterrupt(() => "")
+		// @ts-expect-error CliFailed has no handler.
+		.exhaustive();
+const submitted = (failure: FormFailure) =>
+	// @ts-expect-error CliFailed has no handler.
+	Match.valueTags(failure, {
+		InvalidRequest: () => "",
+		IoFailed: () => "",
+		RpcClientError: () => "",
+	});
+
+test("the matchers' types hold", () => {
+	expect([rendered, submitted]).toHaveLength(2);
 });

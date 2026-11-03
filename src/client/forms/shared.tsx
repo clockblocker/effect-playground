@@ -1,6 +1,6 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
-import { Cause, Exit, Option, Schema } from "effect";
-import { AsyncResult } from "effect/reactivity";
+import { Schema } from "effect";
+import { AsyncResult, type Atom } from "effect/reactivity";
 import type { RpcClientError } from "effect/rpc";
 import { type ReactNode, useId, useMemo } from "react";
 import type {
@@ -11,55 +11,69 @@ import type {
 	UseFormRegisterReturn,
 } from "react-hook-form";
 import { type FieldOf, fieldOf } from "../../shared/generated/protocol.ts";
+import type { customCat, readFile } from "../clients.ts";
+
+/** What either form's mutation fails with. */
+export type FormFailure =
+	| Atom.Failure<typeof readFile>
+	| Atom.Failure<typeof customCat>;
+
+type FormIssue = Extract<
+	FormFailure,
+	{ readonly _tag: "InvalidRequest" }
+>["issues"][number];
 
 /**
- * What a form's mutation fails with: its method's InvalidRequest, an error
- * of something the BFF depends on, such as IoFailed, or the transport's.
+ * Puts each issue under its field, where the resolver's errors go, the first
+ * per field, as the resolver does. react-hook-form drops them on the next
+ * submit, and a field's when its value changes and passes the resolver.
  */
-type Failure<Path extends ReadonlyArray<string | number>> =
-	| {
-			readonly _tag: "InvalidRequest";
-			readonly issues: ReadonlyArray<{
-				readonly path: Path;
-				readonly message: string;
-			}>;
-	  }
-	| { readonly _tag: "IoFailed" | "CliFailed"; readonly message: string }
-	| RpcClientError.RpcClientError;
-
-/**
- * Puts a failed submit on the form: each issue under its field, where the
- * resolver's errors go, and anything else as `root.server`, which `Outcome`
- * shows. react-hook-form drops them all on the next submit, and a field's
- * when its value changes and passes the resolver.
- */
-export function setFailure<Path extends ReadonlyArray<string | number>>(
-	exit: Exit.Exit<unknown, Failure<Path>>,
-	setError: (name: FieldOf<Path> | "root.server", error: ErrorOption) => void,
+export function setIssues<I extends FormIssue>(
+	issues: ReadonlyArray<I>,
+	setError: (name: FieldOf<I["path"]>, error: ErrorOption) => void,
 ): void {
-	// A cancelled submit says nothing: no one is waiting for it.
-	if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return;
-	const failure = Cause.findErrorOption(exit.cause);
-	if (Option.isNone(failure)) {
-		// No typed error in the cause: a defect, which the BFF logged.
-		setError("root.server", { message: "Something went wrong." });
-	} else if (failure.value._tag === "RpcClientError") {
-		// The transport error is the client's own, so its wording lives here.
-		setError("root.server", {
-			message: `Request failed: ${transportMessage(failure.value)}`,
-		});
-	} else if (failure.value._tag !== "InvalidRequest") {
-		setError("root.server", { message: failure.value.message });
-	} else {
-		// The first issue per field, as the resolver does.
-		const named = new Set<string>();
-		for (const { path, message } of failure.value.issues) {
-			const field = fieldOf(path);
-			if (named.has(field)) continue;
-			named.add(field);
-			setError(field, { type: "server", message });
-		}
+	const named = new Set<string>();
+	for (const issue of issues) {
+		const field = fieldOf<I["path"]>(issue.path);
+		if (named.has(field)) continue;
+		named.add(field);
+		setError(field, { type: "server", message: issue.message });
 	}
+}
+
+/**
+ * A mutation's latest result: its success, or a message for a failure that
+ * isn't about a field. A submit puts an InvalidRequest's issues under the
+ * fields, and a cancelled one says nothing: no one is waiting for it.
+ */
+export function Outcome<A>({
+	result,
+	children,
+}: {
+	result: AsyncResult.AsyncResult<A, FormFailure>;
+	children: (value: A) => ReactNode;
+}) {
+	return (
+		AsyncResult.builder(AsyncResult.map(result, children))
+			.onInitial(() => null)
+			.onSuccess((node) => node)
+			.onWaiting(() => null)
+			.onErrorTag("InvalidRequest", () => null)
+			.onErrorTag(["IoFailed", "CliFailed"], ({ message }) => (
+				<Alert>{message}</Alert>
+			))
+			.onErrorTag("RpcClientError", (error) => (
+				<Alert>{`Request failed: ${transportMessage(error)}`}</Alert>
+			))
+			// Before onInterrupt: a defect beside an interruption still shows.
+			.onDefect(() => <Alert>Something went wrong.</Alert>)
+			.onInterrupt(() => null)
+			.exhaustive()
+	);
+}
+
+function Alert({ children }: { children: ReactNode }) {
+	return <p role="alert">{children}</p>;
 }
 
 // An HTTP error's own message is empty; its cause, such as a TransportError,
@@ -117,21 +131,4 @@ export function TextField({
 			)}
 		</div>
 	);
-}
-
-/**
- * A mutation's latest success, or in its place the form's `root.server`
- * error. A failure without one, such as an interruption, shows nothing.
- */
-export function Outcome<A>({
-	result,
-	error,
-	children,
-}: {
-	result: AsyncResult.AsyncResult<A, unknown>;
-	error: { readonly message?: string } | undefined;
-	children: (value: A) => ReactNode;
-}) {
-	if (error !== undefined) return <p role="alert">{error.message}</p>;
-	return AsyncResult.isSuccess(result) ? children(result.value) : null;
 }

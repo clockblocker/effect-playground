@@ -312,7 +312,7 @@ names anything but its fields, and on an error's field that would shadow the
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
-bun run test             # builds the C++; runs custom_cat, the walker, the BFF and setFailure
+bun run test             # builds the C++; runs custom_cat, the walker, the BFF and the forms' matching
 bun run generate:check
 ```
 
@@ -331,25 +331,31 @@ type tests, which `bun run check` runs.
 - `src/server/` is the BFF: `BffReader` and `CustomCatCli`, and the three
   transports mounted on one router.
 - `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
-  `BffRpcClient`. The client's runtime is an atom too, so the protocol is
-  built once, not per submit. `main.tsx` wraps the page in
-  `@effect/atom-react`'s `RegistryProvider`, which holds the atoms.
-  `App` renders two forms, `forms/read-file.tsx` (`ReadFileForm`) and
-  `forms/run-cli.tsx` (`RunCliForm`), and passes each its schema, the
-  generated `ReadFile.Request` or `CustomCat.Request`, which its
-  react-hook-form resolver uses. Each runs its procedure as a mutation, which
-  holds an `AsyncResult` of the success struct, failing with exactly the
-  procedure's `Failure` (and `CliFailed`, for a copy) or the client's
-  `RpcClientError`. A submit
-  runs the mutation and waits for its `Exit`, which keeps the button disabled
-  meanwhile. `forms/shared.tsx` holds what both use: the resolver hook, a
-  text field with its error under it, `setFailure` and `Outcome`. On a
-  failed submit, `setFailure` puts each issue under its field with
+  `BffRpcClient`, with a mutation per procedure, `readFile` and `customCat`.
+  The client's runtime is an atom too, so the protocol is built once, not per
+  submit. `main.tsx` wraps the page in `@effect/atom-react`'s
+  `RegistryProvider`, which holds the atoms. `App` renders two forms,
+  `forms/read-file.tsx` (`ReadFileForm`) and `forms/run-cli.tsx`
+  (`RunCliForm`), and passes each its schema, the generated `ReadFile.Request`
+  or `CustomCat.Request`, which its react-hook-form resolver uses. Each runs
+  its procedure's mutation, which holds an `AsyncResult` of the success
+  struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
+  a copy) or the client's `RpcClientError`: `Atom.Failure<typeof customCat>`.
+  `forms/shared.tsx` holds what both use: the resolver hook, a text field with
+  its error under it, `FormFailure`, either mutation's failure, `setIssues`
+  and `Outcome`. A submit runs the mutation and waits for its `Exit`, which
+  keeps the button disabled meanwhile, and matches its error with
+  `Match.valueTags`: an `InvalidRequest` goes to `setIssues`, which puts the
+  first issue per field under it with
   `setError(fieldOf(issue.path), { type: "server", message })`, where the
   resolver's errors go; react-hook-form drops it once the field changes and
-  passes the resolver, or on the next submit. Any other failure, or a
-  defect, becomes `root.server`, which `Outcome` shows where the success
-  goes; an interruption shows nothing.
+  passes the resolver, or on the next submit. `Outcome` renders the
+  mutation's `AsyncResult` with `AsyncResult.builder`, where the success
+  goes: the success, a Dependency's `message`, `Request failed: ` for the
+  transport, `Something went wrong.` for a defect, and nothing for an
+  `InvalidRequest`, an interruption, or a failure while the next submit
+  waits. Both matchers are exhaustive (`exhaustive()`, and `valueTags` without
+  a fallback), so a new error doesn't compile until each handles it.
 - `test/` holds the Bun tests.
 - `scripts/` builds the C++ and runs the code generator.
 

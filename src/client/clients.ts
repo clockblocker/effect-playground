@@ -20,7 +20,7 @@ const httpClient = Layer.effect(
 // The RPC client as atoms, derived from the contract. Its runtime is an atom
 // too, so the protocol is built once per registry, when the page mounts a
 // mutation, and kept while one stays mounted.
-export class BffRpcClient extends AtomRpc.Service<BffRpcClient>()(
+class BffRpcClient extends AtomRpc.Service<BffRpcClient>()(
 	"effect-playground/BffRpcClient",
 	{
 		group: BffRpcs,
@@ -30,3 +30,7 @@ export class BffRpcClient extends AtomRpc.Service<BffRpcClient>()(
 		),
 	},
 ) {}
+
+// A mutation per procedure, whose result is the latest call's.
+export const readFile = BffRpcClient.mutation("ReadFile");
+export const customCat = BffRpcClient.mutation("CustomCat");
