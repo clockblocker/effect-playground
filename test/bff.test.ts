@@ -200,7 +200,7 @@ describe("REST", () => {
 		expect(JSON.parse(both.body).issues).toEqual([
 			{
 				message:
-					"Size validation failed: Value expected to be greater than or equal to 5, but got 2.",
+					"Code point count validation failed: Value expected to be greater than or equal to 5, but got 2.",
 				path: ["inputFile"],
 			},
 			{

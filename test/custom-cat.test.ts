@@ -60,7 +60,7 @@ const notTxt = (name: string) =>
 const notPlain = (name: string) =>
 	`String '${name}' did not match format 'plain file name': '^(?!\\.\\.?$)[^/\\\\]*$'.`;
 const tooShort = (size: number) =>
-	`Size validation failed: Value expected to be greater than or equal to 5, but got ${size}.`;
+	`Code point count validation failed: Value expected to be greater than or equal to 5, but got ${size}.`;
 
 describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 	beforeAll(buildCpp, 600_000);
@@ -150,7 +150,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{
 				message:
-					"Size validation failed: Value expected to be less than or equal to 25, but got 27.",
+					"Code point count validation failed: Value expected to be less than or equal to 25, but got 27.",
 				path: ["outputFile"],
 			},
 		]);
@@ -173,6 +173,54 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		expect(result.exitCode).toBe(1);
 		expect(invalidRequest(result.stdout).issues).toEqual([
 			{ message: "Required", path: ["outputFile"] },
+		]);
+	});
+
+	test("counts a name's code points, not its bytes, as the form does", async () => {
+		const formAccepts = Schema.is(CustomCat.Request);
+		const cases = [
+			// 20 code points, 36 bytes.
+			[`${"ä".repeat(16)}.txt`, undefined],
+			["äö.t", tooShort(4)],
+			[
+				`${"ä".repeat(22)}.txt`,
+				"Code point count validation failed: Value expected to be less than or equal to 25, but got 26.",
+			],
+		] as const;
+		await customCat(["--input-file=hello.txt"]);
+		for (const [name, message] of cases) {
+			const result = await run([
+				"--input-file=hello.txt",
+				`--output-file=${name}`,
+			]);
+			expect(result.exitCode).toBe(message === undefined ? 0 : 1);
+			if (message !== undefined) {
+				expect(invalidRequest(result.stdout).issues).toEqual([
+					{ message, path: ["outputFile"] },
+				]);
+			}
+			expect(
+				formAccepts({ inputFile: "hello.txt", outputFile: name }),
+			).toBe(message === undefined);
+		}
+		expect(Buffer.byteLength(cases[0][0])).toBe(36);
+	});
+
+	test("rejects a name that isn't valid UTF-8", async () => {
+		await customCat(["--input-file=hello.txt"]);
+		const child = Bun.spawn(
+			[
+				"sh",
+				"-c",
+				`exec "$0" --input-file=hello.txt --output-file="$(printf 'ab\\377cd.txt')"`,
+				customCatBinary,
+			],
+			{ cwd: directory, stdout: "pipe" },
+		);
+		const stdout = await new Response(child.stdout).text();
+		expect(await child.exited).toBe(1);
+		expect(invalidRequest(stdout).issues).toEqual([
+			{ message: "String is not valid UTF-8.", path: ["outputFile"] },
 		]);
 	});
 

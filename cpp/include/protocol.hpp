@@ -15,8 +15,10 @@
 // - A rule across fields lives on the request, in its `Rules` (see
 //   validate.hpp), and names the field its issue goes on.
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <string>
@@ -50,6 +52,57 @@ struct InvalidRequest {
 		"Every problem with the request's fields, one per failed rule.",
 		rfl::Validator<std::vector<Issue>, rfl::Size<rfl::Minimum<1>>>>
 		issues;
+};
+
+// The code points of a UTF-8 string, or nothing if it isn't valid UTF-8.
+inline std::optional<std::size_t> code_points(const std::string& value) {
+	std::size_t count = 0;
+	for (std::size_t i = 0; i < value.size(); ++count) {
+		const auto lead = static_cast<unsigned char>(value[i]);
+		const std::size_t length = lead < 0x80   ? 1
+								   : lead < 0xC2 ? 0
+								   : lead < 0xE0 ? 2
+								   : lead < 0xF0 ? 3
+								   : lead < 0xF5 ? 4
+												 : 0;
+		if (length == 0 || i + length > value.size()) return std::nullopt;
+		for (std::size_t j = 1; j < length; ++j) {
+			if ((static_cast<unsigned char>(value[i + j]) & 0xC0) != 0x80) {
+				return std::nullopt;
+			}
+		}
+		i += length;
+	}
+	return count;
+}
+
+struct Utf8 {
+	static rfl::Result<std::string> validate(const std::string& value) {
+		if (!code_points(value)) return rfl::error("String is not valid UTF-8.");
+		return value;
+	}
+};
+
+// rfl::Size counts bytes, but the minLength and maxLength its schema emits
+// count code points, as the generated TS does. This counts code points, with
+// Size's schema.
+template <class V>
+struct CodePoints {
+	static rfl::Result<std::string> validate(const std::string& value) {
+		const auto count = code_points(value);
+		if (!count) return rfl::error("String is not valid UTF-8.");
+		return V::validate(*count)
+			.transform([&](const auto&) { return value; })
+			.transform_error([](const rfl::Error& error) {
+				return rfl::Error("Code point count validation failed: " +
+								  error.what());
+			});
+	}
+
+	template <class T>
+	static rfl::parsing::schema::ValidationType to_schema() {
+		return rfl::Size<V>::template to_schema<T>();
+	}
 };
 
 using PlainName =
@@ -103,8 +156,9 @@ struct ExistingFile {
 
 // Each refinement only checks a name its base accepts: "x.md" is too short,
 // and no more. The rules come first, then what the files say.
-using Name = Checked<std::string, rfl::Size<rfl::Minimum<5>>,
-					 rfl::Size<rfl::Maximum<25>>>;
+using Text = Checked<std::string, Utf8>;
+using Name =
+	Checked<Text, CodePoints<rfl::Minimum<5>>, CodePoints<rfl::Maximum<25>>>;
 using FileName = Checked<Name, PlainName, TxtFile>;
 using InFiles = Checked<FileName, NotALink>;
 using Existing = Checked<InFiles, ExistingFile>;

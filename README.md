@@ -241,8 +241,9 @@ using TxtFile = rfl::PatternValidator<R"(^.+\.txt$)", ".txt file name">;
 struct NotALink {
 	static rfl::Result<std::string> validate(const std::string& name);
 };
-using Name = Checked<std::string, rfl::Size<rfl::Minimum<5>>,
-					 rfl::Size<rfl::Maximum<25>>>;
+using Text = Checked<std::string, Utf8>;
+using Name =
+	Checked<Text, CodePoints<rfl::Minimum<5>>, CodePoints<rfl::Maximum<25>>>;
 using FileName = Checked<Name, PlainName, TxtFile>;
 using InFiles = Checked<FileName, NotALink>;
 using Existing = Checked<InFiles, ExistingFile>;
@@ -253,8 +254,9 @@ is:
 
 | Rule | Validator | Message |
 |---|---|---|
-| 5 or more characters | `rfl::Size<rfl::Minimum<5>>` | `Size validation failed: Value expected to be greater than or equal to 5, but got 4.` |
-| 25 or fewer | `rfl::Size<rfl::Maximum<25>>` | `Size validation failed: Value expected to be less than or equal to 25, but got 27.` |
+| valid UTF-8 | `Utf8` | `String is not valid UTF-8.` |
+| 5 or more characters | `CodePoints<rfl::Minimum<5>>` | `Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.` |
+| 25 or fewer | `CodePoints<rfl::Maximum<25>>` | `Code point count validation failed: Value expected to be less than or equal to 25, but got 27.` |
 | a plain name | `PlainName` | `String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.` |
 | `.txt` | `TxtFile` | `String 'config.json' did not match format '.txt file name': '^.+\.txt$'.` |
 | not a link | `NotALink` | `"out.txt" is a link, which could lead outside the files directory` |
@@ -263,9 +265,10 @@ is:
 | not a hard link to the input | `DifferentFiles` | `"same.txt" is the input file under another name` |
 | present | none: the walker | `Required` |
 
-`rfl::Size` counts a string's bytes, while JSON Schema's `minLength` and
-`maxLength`, and so the form, count code points: a name of non-ASCII
-letters can pass the form and be too long for `custom_cat`.
+`CodePoints<V>` is `rfl::Size<V>` counting a string's code points, not its
+bytes, with `Size`'s schema: JSON Schema's `minLength` and `maxLength`, and
+so the form, count code points too, so both sides take the same names. The
+comparison and its words are the wrapped `rfl::Minimum` or `rfl::Maximum`'s.
 
 A `Checked` whose base is another one only runs its validators on a value
 the base accepts, so `x.md` is too short and nothing else, and the rules
@@ -301,7 +304,7 @@ it on.
 
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
-   keyword: `rfl::Size` `minLength` or `maxLength`, a `PatternValidator` a
+   keyword: `CodePoints` `minLength` or `maxLength`, a `PatternValidator` a
    `pattern`; `NotALink` and `ExistingFile` have none.
 2. `scripts/generate.ts` turns that into Effect Schema in one module,
    `src/shared/generated/protocol.ts`: a TypeScript namespace per method,

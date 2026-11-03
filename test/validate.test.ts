@@ -7,7 +7,7 @@ import { buildCpp, validateFixtureBinary } from "../scripts/cpp.ts";
 const directory = mkdtempSync(join(tmpdir(), "validate-"));
 // reflect-cpp's own messages, as each validator words them.
 const short =
-	"Size validation failed: Value expected to be greater than or equal to 5, but got 4.";
+	"Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.";
 const notTxt = (name: string) =>
 	`String '${name}' did not match format '.txt file name': '^.+\\.txt$'.`;
 const required = "Required";
@@ -94,7 +94,7 @@ describe.skipIf(Bun.which("cmake") === null)("validate", () => {
 			}),
 		).toEqual([
 			[
-				"Size validation failed: Value expected to be less than or equal to 25, but got 30.",
+				"Code point count validation failed: Value expected to be less than or equal to 25, but got 30.",
 				"label",
 			],
 			[short, "tags", 1],

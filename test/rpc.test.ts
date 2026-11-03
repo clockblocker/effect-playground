@@ -144,7 +144,7 @@ describe("RPC", () => {
 						issues: [
 							{
 								message:
-									"Size validation failed: Value expected to be greater than or equal to 5, but got 4.",
+									"Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.",
 								path: ["inputFile"],
 							},
 						],

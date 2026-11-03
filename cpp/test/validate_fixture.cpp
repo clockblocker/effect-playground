@@ -37,7 +37,8 @@ struct Batch {
 		label;
 	// Both rules on one level, so both can fail.
 	std::vector<
-		Checked<std::string, rfl::Size<rfl::Minimum<5>>, protocol::TxtFile>>
+		Checked<std::string, protocol::CodePoints<rfl::Minimum<5>>,
+				protocol::TxtFile>>
 		tags;
 };
 
