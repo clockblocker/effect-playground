@@ -5,6 +5,9 @@ const root = join(import.meta.dir, "..");
 const source = join(root, "cpp");
 const build = join(source, "build");
 
+/** Copies one .txt file in `files/` to another; see `cpp/src/custom_cat.cpp`. */
+export const customCatBinary = join(build, "custom_cat");
+
 /** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
 export const protocolSchemaBinary = join(build, "protocol_schema");
 

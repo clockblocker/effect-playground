@@ -16,7 +16,7 @@ export interface Definition {
 	readonly message: string | undefined;
 }
 
-/** The root struct: a procedure, never sent, naming what it takes and returns. */
+/** A procedure struct, never sent, naming what it takes, returns and fails with. */
 export interface Procedure {
 	readonly name: string;
 	readonly payload: string;
@@ -45,15 +45,32 @@ export const placeholder = /\{([^{}]*)\}/g;
 const errorOwnFields = new Set(["name", "message", "stack", "cause"]);
 
 /**
- * Reads the JSON Schema that reflect-cpp emits for the procedure struct and
- * undoes its encodings: `$defs` keys such as `protocol__NotTxtFile` or
- * `protocol__NotTxtFile__tagged` become C++ names, and the `_tag`
- * property of a tagged alternative becomes its tag. Fails on any shape the
- * emitter does not support, rather than emitting something wrong.
+ * Reads the JSON Schema that reflect-cpp emits for a procedure struct, or
+ * for a `std::tuple` of them, and undoes its encodings: `$defs` keys such as
+ * `protocol__NotTxtFile` or `protocol__NotTxtFile__tagged` become C++ names,
+ * and the `_tag` property of a tagged alternative becomes its tag. Fails on
+ * any shape the emitter does not support, rather than emitting something
+ * wrong.
  */
 export function normalize(document: unknown): Protocol {
-	if (!Predicate.isObject(document) || typeof document.$ref !== "string") {
-		throw new Error("Expected a schema whose root is a $ref into $defs");
+	if (!Predicate.isObject(document)) {
+		throw new Error("Expected a schema object");
+	}
+	const roots =
+		typeof document.$ref === "string"
+			? [document.$ref]
+			: Array.isArray(document.prefixItems)
+				? document.prefixItems.map((item) =>
+						Predicate.isObject(item) &&
+						typeof item.$ref === "string"
+							? item.$ref
+							: "",
+					)
+				: [];
+	if (roots.length === 0 || roots.includes("")) {
+		throw new Error(
+			"Expected a schema whose root is a $ref into $defs, or a tuple of them",
+		);
 	}
 	const defs = Predicate.isObject(document.$defs) ? document.$defs : {};
 
@@ -83,32 +100,12 @@ export function normalize(document: unknown): Protocol {
 		definitions.set(name, normalizeDefinition(name, raw, rename));
 	}
 
-	const root = names.get(document.$ref.slice(definitionRef.length));
-	if (root === undefined) throw new Error(`Unknown root ${document.$ref}`);
-	const rootSchema = definitions.get(root.name)?.schema;
-	const field = (property: string) => {
-		const properties = Predicate.isObject(rootSchema?.properties)
-			? rootSchema.properties
-			: {};
-		const schema = properties[property];
-		if (!Predicate.isObject(schema)) {
-			throw new Error(`${root.name} has no ${property} field`);
-		}
-		return schema;
-	};
-	const refName = (schema: JsonSchema.JsonSchema, role: string) => {
-		const ref = schema.$ref;
-		if (typeof ref !== "string" || !ref.startsWith(definitionRef)) {
-			throw new Error(`${root.name}.${role} must be a struct`);
-		}
-		return ref.slice(definitionRef.length);
-	};
-
-	const error = field("error");
-	const alternatives = Array.isArray(error.anyOf) ? error.anyOf : [error];
-	const errors = alternatives.map((alternative) =>
-		refName(Predicate.isObject(alternative) ? alternative : {}, "error"),
-	);
+	const procedures = roots.map((ref) => {
+		const root = names.get(ref.slice(definitionRef.length));
+		if (root === undefined) throw new Error(`Unknown root ${ref}`);
+		return { ...root, ...procedure(root.name, definitions) };
+	});
+	const errors = new Set(procedures.flatMap(({ errors }) => errors));
 	for (const name of errors) {
 		const definition = definitions.get(name);
 		if (definition?.tag !== name) {
@@ -119,28 +116,57 @@ export function normalize(document: unknown): Protocol {
 		checkError(definition);
 	}
 	for (const definition of definitions.values()) {
-		if (
-			definition.message !== undefined &&
-			!errors.includes(definition.name)
-		) {
+		if (definition.message !== undefined && !errors.has(definition.name)) {
 			throw new Error(
 				`${definition.name} has a message template, but only errors take one`,
 			);
 		}
 	}
 
-	definitions.delete(root.name);
+	for (const { name } of procedures) definitions.delete(name);
 	return {
-		namespace: root.namespace,
-		procedures: [
-			{
-				name: root.name,
-				payload: refName(field("payload"), "payload"),
-				success: refName(field("success"), "success"),
-				errors,
-			},
-		],
+		namespace: procedures[0]?.namespace ?? "",
+		procedures: procedures.map(
+			({ namespace: _, ...procedure }) => procedure,
+		),
 		definitions,
+	};
+}
+
+/** What a procedure struct's `payload`, `success` and `error` refer to. */
+function procedure(
+	name: string,
+	definitions: ReadonlyMap<string, Definition>,
+): Omit<Procedure, "name"> {
+	const schema = definitions.get(name)?.schema;
+	const field = (property: string) => {
+		const properties = Predicate.isObject(schema?.properties)
+			? schema.properties
+			: {};
+		const field = properties[property];
+		if (!Predicate.isObject(field)) {
+			throw new Error(`${name} has no ${property} field`);
+		}
+		return field;
+	};
+	const refName = (schema: JsonSchema.JsonSchema, role: string) => {
+		const ref = schema.$ref;
+		if (typeof ref !== "string" || !ref.startsWith(definitionRef)) {
+			throw new Error(`${name}.${role} must be a struct`);
+		}
+		return ref.slice(definitionRef.length);
+	};
+	const error = field("error");
+	const alternatives = Array.isArray(error.anyOf) ? error.anyOf : [error];
+	return {
+		payload: refName(field("payload"), "payload"),
+		success: refName(field("success"), "success"),
+		errors: alternatives.map((alternative) =>
+			refName(
+				Predicate.isObject(alternative) ? alternative : {},
+				"error",
+			),
+		),
 	};
 }
 

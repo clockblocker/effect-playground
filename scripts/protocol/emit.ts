@@ -12,8 +12,9 @@ import {
  *
  * Each procedure gets a TypeScript namespace of its own name. In it, its
  * payload is `Request`, its success `Success` and its error union `Failure`,
- * and every other definition it uses, such as its error classes, keeps its
- * own name.
+ * and every other definition only it uses, such as an error class, keeps its
+ * own name. A definition more than one procedure uses, such as an error both
+ * fail with, is declared once, before the namespaces, so it has one name.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -26,25 +27,40 @@ export function emit(
 ): { readonly file: string; readonly source: string } {
 	const { namespace, procedures, definitions } = protocol;
 
-	// A definition lives in the namespace of the one procedure that uses it.
-	const owners = new Map<string, string>();
-	const namespaces = procedures.map((procedure) => {
-		const names = dependencyOrder(
+	const uses = procedures.map((procedure) => ({
+		procedure,
+		names: dependencyOrder(
 			[procedure.payload, procedure.success, ...procedure.errors],
 			definitions,
-		);
+		),
+	}));
+	const users = new Map<string, string[]>();
+	for (const { procedure, names } of uses) {
 		for (const name of names) {
-			const owner = owners.get(name);
-			if (owner !== undefined) {
-				throw new Error(
-					`${name} is used by both ${owner} and ${procedure.name}, and ` +
-						"the generator has no module for shared definitions yet",
-				);
-			}
-			owners.set(name, procedure.name);
+			users.set(name, [...(users.get(name) ?? []), procedure.name]);
 		}
-		return procedureNamespace(procedure, names, definitions);
-	});
+	}
+	const shared = new Set(
+		[...users].filter(([, by]) => by.length > 1).map(([name]) => name),
+	);
+	for (const name of shared) {
+		const by = users.get(name)?.join(" and ");
+		const owner = procedures.find(
+			({ payload, success }) => payload === name || success === name,
+		);
+		if (owner !== undefined) {
+			throw new Error(
+				`${name} is used by ${by}, but ${owner.name} declares it as ` +
+					`${owner.payload === name ? "Request" : "Success"}; the ` +
+					"generator can only share other definitions, such as errors",
+			);
+		}
+	}
+	// Each procedure's names are in dependency order, so their first
+	// occurrences are too.
+	const sharedNames = [...new Set(uses.flatMap(({ names }) => names))].filter(
+		(name) => shared.has(name),
+	);
 
 	const source = [
 		...header.map((line) => `// ${line}`),
@@ -53,7 +69,12 @@ export function emit(
 		"",
 		'import { Schema } from "effect";',
 		"",
-		...namespaces,
+		...sharedNames.map((name) =>
+			declare(required(definitions, name), definitions),
+		),
+		...uses.map(({ procedure, names }) =>
+			procedureNamespace(procedure, names, shared, definitions),
+		),
 	].join("\n");
 	return {
 		file: `${kebabCase(pascalCase(namespace || "protocol"))}.ts`,
@@ -65,6 +86,7 @@ const namespaceNote = [
 	"A namespace per method makes `ReadFile.Success` both the schema and its",
 	"type, and TypeScript 7 hovers read `ReadFile.Success`. Namespaces are",
 	"TypeScript-only syntax that emits code, which Bun and Vite both compile.",
+	"What more than one method uses is declared once, before the namespaces.",
 ];
 
 /** The names a procedure's namespace gives its payload, success and errors. */
@@ -73,6 +95,7 @@ const roleNames = ["Request", "Success", "Failure"] as const;
 function procedureNamespace(
 	procedure: Procedure,
 	names: readonly string[],
+	shared: ReadonlySet<string>,
 	definitions: ReadonlyMap<string, Definition>,
 ): string {
 	const { payload, success } = procedure;
@@ -107,9 +130,11 @@ function procedureNamespace(
 			`What ${procedure.name} succeeds with.`,
 		]);
 	}
-	const declarations = names.map((name) =>
-		declare(required(definitions, name), definitions, roles.get(name)),
-	);
+	const declarations = names
+		.filter((name) => !shared.has(name))
+		.map((name) =>
+			declare(required(definitions, name), definitions, roles.get(name)),
+		);
 	const sameStruct =
 		success === payload
 			? [

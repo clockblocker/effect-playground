@@ -1,5 +1,9 @@
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
-import { ReadFile } from "../shared/generated/protocol.ts";
+import {
+	FileNotFound,
+	NotTxtFile,
+	type ReadFile,
+} from "../shared/generated/protocol.ts";
 
 export class BffReader extends Context.Service<
 	BffReader,
@@ -18,7 +22,7 @@ export class BffReader extends Context.Service<
 
 			const read = Effect.fn("BffReader.read")(function* (name: string) {
 				if (path.extname(name) !== ".txt") {
-					return yield* new ReadFile.NotTxtFile({ file: name });
+					return yield* new NotTxtFile({ file: name });
 				}
 				// basename keeps "../../etc/passwd.txt" inside the files folder.
 				const contents = yield* fs
@@ -27,10 +31,7 @@ export class BffReader extends Context.Service<
 						Effect.catchReason(
 							"PlatformError",
 							"NotFound",
-							() =>
-								Effect.fail(
-									new ReadFile.FileNotFound({ file: name }),
-								),
+							() => Effect.fail(new FileNotFound({ file: name })),
 							// Any other reason (permissions, a directory named x.txt) is
 							// a bug, not a case the client handles: make it a defect.
 							Effect.die,

@@ -1,7 +1,89 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$ref": "#/$defs/protocol__ReadFile",
+    "type": "array",
+    "prefixItems": [
+        {
+            "$ref": "#/$defs/protocol__ReadFile"
+        },
+        {
+            "$ref": "#/$defs/protocol__CustomCat"
+        }
+    ],
+    "items": false,
     "$defs": {
+        "protocol__CustomCat": {
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "$ref": "#/$defs/protocol__CustomCatRequest"
+                },
+                "success": {
+                    "$ref": "#/$defs/protocol__CustomCatSuccess"
+                },
+                "error": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/protocol__NotTxtFile__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/protocol__FileNotFound__tagged"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "payload",
+                "success",
+                "error"
+            ]
+        },
+        "protocol__CustomCatRequest": {
+            "type": "object",
+            "properties": {
+                "inputFile": {
+                    "description": "The file to copy, such as \"hello.txt\". Only its base name is used, so a request never leaves the files directory.",
+                    "allOf": [
+                        {
+                            "type": "string",
+                            "minLength": 5
+                        },
+                        {
+                            "type": "string",
+                            "maxLength": 25
+                        }
+                    ]
+                },
+                "outputFile": {
+                    "description": "The file to write the copy to, replacing it if it exists. Only its base name is used, as for the input.",
+                    "allOf": [
+                        {
+                            "type": "string",
+                            "minLength": 5
+                        },
+                        {
+                            "type": "string",
+                            "maxLength": 25
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "inputFile",
+                "outputFile"
+            ]
+        },
+        "protocol__CustomCatSuccess": {
+            "type": "object",
+            "properties": {
+                "bytesCopied": {
+                    "type": "integer",
+                    "description": "How many bytes the output file holds."
+                }
+            },
+            "required": [
+                "bytesCopied"
+            ]
+        },
         "protocol__FileNotFound__tagged": {
             "type": "object",
             "x-message": "\"{file}\" does not exist",

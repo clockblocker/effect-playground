@@ -5,8 +5,30 @@
 // A namespace per method makes `ReadFile.Success` both the schema and its
 // type, and TypeScript 7 hovers read `ReadFile.Success`. Namespaces are
 // TypeScript-only syntax that emits code, which Bun and Vite both compile.
+// What more than one method uses is declared once, before the namespaces.
 
 import { Schema } from "effect";
+
+export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()("NotTxtFile", {
+	/** The requested name, which does not end in .txt. */
+	file: Schema.String,
+}) {
+	override get message(): string {
+		return `"${this.file}" is not a .txt file`;
+	}
+}
+
+export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
+	"FileNotFound",
+	{
+		/** The requested name; no such .txt file exists. */
+		file: Schema.String,
+	},
+) {
+	override get message(): string {
+		return `"${this.file}" does not exist`;
+	}
+}
 
 /** What the ReadFile method takes, succeeds with and fails with. */
 export namespace ReadFile {
@@ -34,31 +56,50 @@ export namespace ReadFile {
 	});
 	export interface Success extends Schema.Schema.Type<typeof Success> {}
 
-	export class NotTxtFile extends Schema.TaggedError<NotTxtFile>()(
-		"NotTxtFile",
-		{
-			/** The requested name, which does not end in .txt. */
-			file: Schema.String,
-		},
-	) {
-		override get message(): string {
-			return `"${this.file}" is not a .txt file`;
-		}
-	}
-
-	export class FileNotFound extends Schema.TaggedError<FileNotFound>()(
-		"FileNotFound",
-		{
-			/** The requested name; no such .txt file exists. */
-			file: Schema.String,
-		},
-	) {
-		override get message(): string {
-			return `"${this.file}" does not exist`;
-		}
-	}
-
 	/** Every error ReadFile can fail with. */
+	export const Failure = Schema.Union([NotTxtFile, FileNotFound]);
+	export type Failure = typeof Failure.Type;
+}
+
+/** What the CustomCat method takes, succeeds with and fails with. */
+export namespace CustomCat {
+	/** What CustomCat takes. */
+	export const Request = Schema.Struct({
+		/**
+		 * The file to copy, such as "hello.txt". Only its base name is used, so a
+		 * request never leaves the files directory.
+		 */
+		inputFile: Schema.String.check(
+			Schema.isMinCodePoints(5, {
+				message: "Must be at least 5 characters long",
+			}),
+			Schema.isMaxCodePoints(25, {
+				message: "Must be at most 25 characters long",
+			}),
+		),
+		/**
+		 * The file to write the copy to, replacing it if it exists. Only its base
+		 * name is used, as for the input.
+		 */
+		outputFile: Schema.String.check(
+			Schema.isMinCodePoints(5, {
+				message: "Must be at least 5 characters long",
+			}),
+			Schema.isMaxCodePoints(25, {
+				message: "Must be at most 25 characters long",
+			}),
+		),
+	});
+	export interface Request extends Schema.Schema.Type<typeof Request> {}
+
+	/** What CustomCat succeeds with. */
+	export const Success = Schema.Struct({
+		/** How many bytes the output file holds. */
+		bytesCopied: Schema.Int,
+	});
+	export interface Success extends Schema.Schema.Type<typeof Success> {}
+
+	/** Every error CustomCat can fail with. */
 	export const Failure = Schema.Union([NotTxtFile, FileNotFound]);
 	export type Failure = typeof Failure.Type;
 }

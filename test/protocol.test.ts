@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/protocol/emit.ts";
 import { normalize } from "../scripts/protocol/normalize.ts";
-import { ReadFile } from "../src/shared/generated/protocol.ts";
+import {
+	CustomCat,
+	FileNotFound,
+	NotTxtFile,
+	ReadFile,
+} from "../src/shared/generated/protocol.ts";
 
 // The JSON forms both sides agree on.
 const wire = {
@@ -39,9 +44,9 @@ describe("generated protocol", () => {
 	test("errors decode into the TaggedError classes and encode back", () => {
 		const decode = Schema.decodeUnknownSync(ReadFile.Failure);
 		const notTxt = decode(wire.notTxtFile);
-		expect(notTxt).toBeInstanceOf(ReadFile.NotTxtFile);
+		expect(notTxt).toBeInstanceOf(NotTxtFile);
 		expect(notTxt.file).toBe("config.json");
-		expect(decode(wire.fileNotFound)).toBeInstanceOf(ReadFile.FileNotFound);
+		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
 		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
 			wire.notTxtFile,
 		);
@@ -49,12 +54,12 @@ describe("generated protocol", () => {
 	});
 
 	test("errors fill their C++ message template, and send none of it", () => {
-		const notTxt = new ReadFile.NotTxtFile({ file: "config.json" });
+		const notTxt = new NotTxtFile({ file: "config.json" });
 		expect(notTxt.message).toBe('"config.json" is not a .txt file');
 		expect(String(notTxt)).toStartWith(
 			'NotTxtFile: "config.json" is not a .txt file',
 		);
-		expect(new ReadFile.FileNotFound({ file: "missing.txt" }).message).toBe(
+		expect(new FileNotFound({ file: "missing.txt" }).message).toBe(
 			'"missing.txt" does not exist',
 		);
 		expect(Schema.encodeSync(ReadFile.Failure)(notTxt)).toEqual(
@@ -66,10 +71,34 @@ describe("generated protocol", () => {
 		expect(decoded.message).toBe('"missing.txt" does not exist');
 	});
 
+	test("both custom_cat names follow the same 5 to 25 rule", () => {
+		const accepts = Schema.is(CustomCat.Request);
+		const ok = { inputFile: "hello.txt", outputFile: "copy.txt" };
+		expect(accepts(ok)).toBe(true);
+		expect(accepts({ ...ok, inputFile: "x.md" })).toBe(false);
+		expect(accepts({ ...ok, outputFile: "a".repeat(26) })).toBe(false);
+	});
+
+	test("both methods fail with the same error classes", () => {
+		const decode = Schema.decodeUnknownSync(CustomCat.Failure);
+		expect(decode(wire.notTxtFile)).toBeInstanceOf(NotTxtFile);
+		expect(decode(wire.fileNotFound)).toBeInstanceOf(FileNotFound);
+		expect(
+			Schema.decodeUnknownSync(ReadFile.Failure)(wire.notTxtFile),
+		).toEqual(decode(wire.notTxtFile));
+	});
+
+	test("the schema carries each shared error's template once", async () => {
+		const schema = await Bun.file(
+			new URL("../cpp/protocol.schema.json", import.meta.url),
+		).text();
+		expect(schema.match(/"x-message"/g)).toHaveLength(2);
+	});
+
 	test("errors can be raised and caught by tag", async () => {
 		const caught = await Effect.runPromise(
 			Effect.gen(function* () {
-				return yield* new ReadFile.NotTxtFile({ file: "a.md" });
+				return yield* new NotTxtFile({ file: "a.md" });
 			}).pipe(
 				Effect.catchTags({
 					NotTxtFile: (error) =>
@@ -152,66 +181,6 @@ describe("emitter", () => {
 		expect(source).not.toContain("Query");
 	});
 
-	test("puts each method's errors in its own namespace", () => {
-		const get = normalize(schema);
-		const put = normalize({
-			$ref: "#/$defs/a__b__Put",
-			$defs: {
-				a__b__Put: {
-					type: "object",
-					properties: {
-						payload: { $ref: "#/$defs/a__b__Item" },
-						success: { $ref: "#/$defs/a__b__Stored" },
-						error: { $ref: "#/$defs/a__b__Full__tagged" },
-					},
-					required: ["payload", "success", "error"],
-				},
-				a__b__Item: {
-					type: "object",
-					properties: { body: { type: "string" } },
-					required: ["body"],
-				},
-				a__b__Stored: {
-					type: "object",
-					properties: { id: { type: "integer" } },
-					required: ["id"],
-				},
-				a__b__Full__tagged: {
-					type: "object",
-					"x-message": "no room for more",
-					properties: { _tag: { type: "string", enum: ["Full"] } },
-					required: ["_tag"],
-				},
-			},
-		});
-		const { source } = emit(
-			{
-				...get,
-				procedures: [...get.procedures, ...put.procedures],
-				definitions: new Map([...get.definitions, ...put.definitions]),
-			},
-			["header"],
-		);
-		// From a namespace to the next one, or to the end.
-		const block = (name: string) => {
-			const start = source.indexOf(`export namespace ${name} {`);
-			const end = source.slice(start + 1).search(/^export namespace/m);
-			return source.slice(
-				start,
-				end === -1 ? undefined : start + 1 + end,
-			);
-		};
-		expect(block("Get")).toContain("export class Gone extends");
-		expect(block("Get")).not.toContain("Full");
-		expect(block("Put")).toContain("export class Full extends");
-		expect(block("Put")).toContain(
-			"export const Success = Schema.Struct({",
-		);
-		expect(block("Put")).toContain(
-			"export const Failure = Schema.Union([Full]);",
-		);
-	});
-
 	test("fails on a struct named after a namespace member", () => {
 		const clashing = structuredClone(schema) as {
 			$defs: Record<string, Record<string, unknown>>;
@@ -244,19 +213,6 @@ describe("emitter", () => {
 		});
 		expect(() => emitted(referring)).toThrow(
 			"Gone refers to Query, which Get declares as Request",
-		);
-	});
-
-	test("fails on a definition two methods share, rather than guess", () => {
-		const protocol = normalize(schema);
-		const [get] = protocol.procedures;
-		if (get === undefined) throw new Error("No procedure");
-		const shared = {
-			...protocol,
-			procedures: [get, { ...get, name: "Put" }],
-		};
-		expect(() => emit(shared, ["header"])).toThrow(
-			"Query is used by both Get and Put, and the generator has no module for shared definitions yet",
 		);
 	});
 
@@ -329,5 +285,139 @@ describe("emitter", () => {
 			anyOf: [{ $ref: "#/$defs/a__b__Query" }],
 		};
 		expect(() => normalize(untagged)).toThrow(/TaggedUnion/);
+	});
+});
+
+describe("emitter, for methods that share errors", () => {
+	// reflect-cpp's shape for std::tuple<Get, Put>: Busy is an error of both.
+	const tagged = (tag: string, message: string) => ({
+		type: "object",
+		"x-message": message,
+		properties: { _tag: { type: "string", enum: [tag] } },
+		required: ["_tag"],
+	});
+	const struct = (field: string) => ({
+		type: "object",
+		properties: { [field]: { type: "string" } },
+		required: [field],
+	});
+	const method = (payload: string, success: string, errors: string[]) => ({
+		type: "object",
+		properties: {
+			payload: { $ref: `#/$defs/a__${payload}` },
+			success: { $ref: `#/$defs/a__${success}` },
+			error: {
+				anyOf: errors.map((error) => ({
+					$ref: `#/$defs/a__${error}__tagged`,
+				})),
+			},
+		},
+		required: ["payload", "success", "error"],
+	});
+	const schema = {
+		type: "array",
+		prefixItems: [{ $ref: "#/$defs/a__Get" }, { $ref: "#/$defs/a__Put" }],
+		items: false,
+		$defs: {
+			a__Get: method("Query", "Found", ["Gone", "Busy"]),
+			a__Put: method("Item", "Stored", ["Full", "Busy"]),
+			a__Query: struct("key"),
+			a__Found: struct("value"),
+			a__Item: struct("body"),
+			a__Stored: struct("id"),
+			a__Gone__tagged: tagged("Gone", "gone"),
+			a__Full__tagged: tagged("Full", "no room"),
+			a__Busy__tagged: tagged("Busy", "busy, try again"),
+		} as Record<string, Record<string, unknown>>,
+	};
+	const { source } = emit(normalize(schema), ["header"]);
+
+	// From a namespace to the next one, or to the end.
+	const block = (name: string) => {
+		const start = source.indexOf(`export namespace ${name} {`);
+		const end = source.slice(start + 1).search(/^export namespace/m);
+		return source.slice(start, end === -1 ? undefined : start + 1 + end);
+	};
+
+	test("reads a tuple of methods as one protocol", () => {
+		const protocol = normalize(schema);
+		expect(protocol.namespace).toBe("a");
+		expect(protocol.procedures).toEqual([
+			{
+				name: "Get",
+				payload: "Query",
+				success: "Found",
+				errors: ["Gone", "Busy"],
+			},
+			{
+				name: "Put",
+				payload: "Item",
+				success: "Stored",
+				errors: ["Full", "Busy"],
+			},
+		]);
+	});
+
+	test("declares a shared error once, before the namespaces", () => {
+		const declarations = source.match(/export class Busy extends/g) ?? [];
+		expect(declarations).toHaveLength(1);
+		expect(source.indexOf("export class Busy extends")).toBeLessThan(
+			source.indexOf("export namespace"),
+		);
+		expect(block("Get")).not.toContain("class Busy");
+		expect(block("Put")).not.toContain("class Busy");
+	});
+
+	test("keeps an error only one method has in its namespace", () => {
+		expect(block("Get")).toContain("export class Gone extends");
+		expect(block("Put")).toContain("export class Full extends");
+		expect(block("Get")).not.toContain("Full");
+		expect(block("Put")).not.toContain("Gone");
+	});
+
+	test("refers to the shared class from each Failure", () => {
+		expect(block("Get")).toContain(
+			"export const Failure = Schema.Union([Gone, Busy]);",
+		);
+		expect(block("Put")).toContain(
+			"export const Failure = Schema.Union([Full, Busy]);",
+		);
+		expect(source).toContain("return `busy, try again`;");
+	});
+
+	test("still requires a shared error's message template", () => {
+		const untemplated = structuredClone(schema);
+		delete untemplated.$defs.a__Busy__tagged?.["x-message"];
+		expect(() => normalize(untemplated)).toThrow(
+			/Busy has no message template/,
+		);
+	});
+
+	test("still rejects a shared error's unknown placeholder", () => {
+		const misnamed = structuredClone(schema);
+		Object.assign(misnamed.$defs.a__Busy__tagged ?? {}, {
+			"x-message": "busy with {job}",
+		});
+		expect(() => normalize(misnamed)).toThrow(
+			"Busy's message names {job}, but Busy has no such field (it has none)",
+		);
+	});
+
+	test("still rejects a shared error's reserved field", () => {
+		const shadowing = structuredClone(schema);
+		Object.assign(shadowing.$defs.a__Busy__tagged?.properties as object, {
+			cause: { type: "string" },
+		});
+		expect(() => normalize(shadowing)).toThrow(
+			"Busy.cause would shadow Error.cause; rename the field",
+		);
+	});
+
+	test("fails on a payload two methods share, rather than name it twice", () => {
+		const sharing = structuredClone(schema);
+		sharing.$defs.a__Put = method("Query", "Stored", ["Full"]);
+		expect(() => emit(normalize(sharing), ["header"])).toThrow(
+			"Query is used by Get and Put, but Get declares it as Request",
+		);
 	});
 });

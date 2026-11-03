@@ -12,7 +12,7 @@ RPC and also serves a REST API (`effect/http-api`) for other clients.
 
 ## Prerequisites
 
-Bun, plus a C++20 toolchain for `bun run generate`: CMake 3.24 or newer,
+Bun, plus a C++20 toolchain: CMake 3.24 or newer,
 Ninja and a recent Clang or GCC. On macOS, `xcode-select --install` and
 `brew install cmake ninja`. The first build fetches
 [reflect-cpp](https://github.com/getml/reflect-cpp) v0.26.2 from GitHub, with
@@ -40,10 +40,41 @@ The read has one procedure and one endpoint:
 - REST, for other clients: `GET /api/files/read/:name`. A client HttpApi
   derives from `BffApi` calls it as `client.files.read({ params: { name } })`.
 
+## `custom_cat`
+
+`cpp/build/custom_cat` is a C++ executable that copies one `.txt` file in
+`files/` to another, replacing the output if it exists. `files/` is under its
+working directory, and only each name's base name is used.
+
+```sh
+custom_cat --input-file=hello.txt --output-file=copy.txt
+```
+
+Its flags are the fields of `CustomCatRequest`, which reflect-cpp's CLI
+reader (`rfl/cli.hpp`) spells in kebab-case; an unknown flag is an error. It
+follows the read's rules: both names are 5 to 25 characters, each must be
+`.txt` (else `NotTxtFile` with that name), and the input must exist (else
+`FileNotFound`). What it prints, and its exit codes:
+
+- 0, copied: stdout is `{"bytesCopied":18}`.
+- 1, `NotTxtFile` or `FileNotFound`: stdout is the tagged error, such as
+  `{"_tag":"NotTxtFile","file":"a.json"}`, and stderr its message,
+  `custom_cat: "a.json" is not a .txt file`.
+- 2, a bad argument, such as a missing flag or a name out of bounds:
+  reflect-cpp's error, on stderr.
+- 3, anything else, such as a directory named `x.txt`: on stderr.
+
+stdout is JSON in the generated schemas' wire form: `CustomCat.Success` on
+0, `CustomCat.Failure` on 1. The message on stderr is the error's template
+from the C++ struct, filled in.
+
 ## The protocol
 
-The C++ structs in `cpp/include/protocol.hpp` define the request, the success
-and the two errors.
+The C++ structs in `cpp/include/protocol.hpp` define each procedure's
+request, success and errors: `ReadFile`, which `BffReader` serves, and
+`CustomCat`, which `custom_cat` runs. `Procedures` lists them. Fields are
+snake_case in C++ and camelCase in JSON, through reflect-cpp's
+`SnakeCaseToCamelCase` (`protocol::Wire`).
 
 1. reflect-cpp turns them into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`, adding each error's message template
@@ -52,12 +83,15 @@ and the two errors.
    `src/shared/generated/protocol.ts`: a TypeScript namespace per method,
    named after it, such as `ReadFile`. `ReadFile.Request`, `ReadFile.Success`
    and `ReadFile.Failure` are the payload, the success and the error union
-   (`Failure`, because an `Error` there would shadow the global one), and
-   `ReadFile.NotTxtFile` and `ReadFile.FileNotFound` the `Schema.TaggedError`
-   classes, each with a `message` getter. Each name is both the schema and
-   its type, so `ReadFile.Success` works in either position, and TypeScript 7
-   hovers read `ReadFile.Success`. A struct two methods share would have no
-   namespace, so the generator fails on one.
+   (`Failure`, because an `Error` there would shadow the global one). Each
+   name is both the schema and its type, so `ReadFile.Success` works in
+   either position, and TypeScript 7 hovers read `ReadFile.Success`.
+   `NotTxtFile` and `FileNotFound`, which both methods fail with, are
+   declared once, before the namespaces, as `Schema.TaggedError` classes,
+   each with a `message` getter; both `Failure` unions refer to them. An
+   error only one method has would live in its namespace. The generator
+   fails on a payload or success two methods share, which would need two
+   names.
 3. `BffReader` fails with those error classes, and `src/shared/rest-api.ts`
    gives them their HTTP statuses.
 
@@ -66,13 +100,15 @@ Each error's sentence lives on its C++ struct, as
 The generated class fills it in from its own fields in a `message` getter,
 so `error.message` and `String(error)` read
 `NotTxtFile: "config.json" is not a .txt file`, while the wire form stays
-`{"_tag":"NotTxtFile","file":"config.json"}`. The generator fails on an
+`{"_tag":"NotTxtFile","file":"config.json"}`. `custom_cat` fills in the
+same template for its stderr. The generator fails on an
 error without a template, on a `{field}` the struct doesn't have, and on a
 field named `name`, `message`, `stack` or `cause`, which would shadow the
 `Error`'s own. The client's transport errors get their wording in the client.
 
-A field's reflect-cpp validators travel the same way. `ReadFileRequest::name`
-is an `rfl::Validator` with two `rfl::Size` bounds, so the schema carries
+A field's reflect-cpp validators travel the same way. Every file name is a
+`protocol::FileName`, an `rfl::Validator` with two `rfl::Size` bounds, so the
+schema carries
 `minLength: 5` and `maxLength: 25`, and the TS field is
 `Schema.String.check(Schema.isMinCodePoints(5, …), Schema.isMaxCodePoints(25, …))`.
 The generator writes each bound's message, because JSON Schema has no keyword
@@ -85,6 +121,7 @@ error for it. Each boundary rejects it:
   request gets an `Exit` whose cause is a `Die` with the schema's message.
 - The page: its react-hook-form validates against the same field, so
   it shows the message under the input and never sends the request.
+- `custom_cat`: reflect-cpp rejects the flag, and it exits with 2.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
 re-emits the schema and regenerates the TypeScript. Both outputs are
@@ -97,14 +134,16 @@ committed. `bun run generate:check` fails if either is stale, or if
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
-bun run test
+bun run test             # builds the C++ and runs custom_cat
 bun run generate:check
 ```
 
+The `custom_cat` tests skip when `cmake` isn't on the PATH.
+
 ## Layout
 
-- `cpp/` holds the protocol's structs and the tool that emits their schema.
-  `cpp/build/` is ignored.
+- `cpp/` holds the protocol's structs, `custom_cat` and the tool that emits
+  the schema. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import: the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and the generated protocol.
 - `src/server/` is the BFF: `BffReader`, and the two transports mounted on

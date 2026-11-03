@@ -7,6 +7,7 @@
 #include <rfl/json.hpp>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 
 #include "protocol.hpp"
@@ -35,11 +36,13 @@ std::string tagged_key() {
 	return key + "__tagged";
 }
 
-// Puts "x-message" right after the definition's "type".
+// Puts "x-message" right after the definition's "type", once for an error
+// more than one procedure fails with.
 void add_message(Generic::Object& defs, const std::string& key,
 				 std::string_view message) {
 	if (defs.count(key) == 0) throw std::runtime_error("no definition " + key);
 	auto& definition = object(defs[key], key);
+	if (definition.count("x-message") != 0) return;
 	Generic::Object with_message;
 	for (const auto& [field, value] : definition) {
 		with_message.insert(field, value);
@@ -57,13 +60,21 @@ void add_messages(Generic::Object& defs,
 	(add_message(defs, tagged_key<Errors>(), Errors::message), ...);
 }
 
+template <class... Procedures>
+void add_messages(Generic::Object& defs,
+				  std::type_identity<std::tuple<Procedures...>>) {
+	(add_messages(defs, std::type_identity<decltype(Procedures::error)>()),
+	 ...);
+}
+
 }  // namespace
 
 int main() {
-	using protocol::ReadFile;
-	auto document =
-		rfl::json::read<Generic>(rfl::json::to_schema<ReadFile>()).value();
+	using protocol::Procedures;
+	auto document = rfl::json::read<Generic>(
+						rfl::json::to_schema<Procedures, protocol::Wire>())
+						.value();
 	auto& defs = object(object(document, "the schema")["$defs"], "$defs");
-	add_messages(defs, std::type_identity<decltype(ReadFile::error)>());
+	add_messages(defs, std::type_identity<Procedures>());
 	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";
 }
