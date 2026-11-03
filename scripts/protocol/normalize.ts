@@ -16,6 +16,15 @@ export interface Procedure {
 	readonly name: string;
 	readonly payload: string;
 	readonly success: string;
+	/** What it fails with besides InvalidRequest, such as `IoFailed`. */
+	readonly errors: readonly string[];
+}
+
+/** An error that isn't about a field, such as `IoFailed`. */
+export interface ErrorTemplate {
+	readonly definition: Definition;
+	/** Its message, in which `{field}` stands for that field's value. */
+	readonly message: string;
 }
 
 /** An issue code's message, from the rule that produces it. */
@@ -37,11 +46,14 @@ export interface Protocol {
 	/** The `Issue` and `InvalidRequest` structs, which every procedure shares. */
 	readonly issue: Definition;
 	readonly invalidRequest: Definition;
+	/** Every procedure's other errors, each once, in order of first use. */
+	readonly errors: readonly ErrorTemplate[];
 }
 
 const definitionRef = "#/$defs/";
 const taggedSuffix = "__tagged";
 const issuesKeyword = "x-issues";
+const errorsKeyword = "x-errors";
 
 /** A `{name}` in a message template; splitting by it alternates text and name. */
 export const placeholder = /\{([^{}]*)\}/g;
@@ -121,8 +133,15 @@ export function normalize(document: unknown): Protocol {
 		issue,
 		issues.map(({ code }) => code),
 	);
+	const errors = errorTemplates(
+		[...new Set(procedures.flatMap(({ errors }) => errors))].map((name) =>
+			required(definitions, name),
+		),
+		document[errorsKeyword],
+	);
 
 	for (const { name } of procedures) definitions.delete(name);
+	for (const { definition } of errors) definitions.delete(definition.name);
 	definitions.delete(invalidRequest.name);
 	definitions.delete(issue.name);
 	return {
@@ -134,7 +153,54 @@ export function normalize(document: unknown): Protocol {
 		issues,
 		issue,
 		invalidRequest,
+		errors,
 	};
+}
+
+/**
+ * The schema's "x-errors": the message template of each error besides
+ * InvalidRequest, by tag, whose every `{name}` is one of its fields.
+ */
+function errorTemplates(
+	definitions: readonly Definition[],
+	raw: unknown,
+): ErrorTemplate[] {
+	const templates = Predicate.isObject(raw) ? raw : {};
+	return definitions.map((definition) => {
+		const { name, tag } = definition;
+		const entry = templates[tag ?? name];
+		const message = Predicate.isObject(entry) ? entry.message : undefined;
+		if (typeof message !== "string") {
+			throw new Error(
+				`${name} has no message template in "${errorsKeyword}"`,
+			);
+		}
+		const fields = Object.keys(properties(definition)).filter(
+			(field) => field !== "_tag",
+		);
+		checkErrorFields(definition, fields);
+		for (const [, field = ""] of message.matchAll(placeholder)) {
+			if (!fields.includes(field)) {
+				throw new Error(
+					`${name}'s message names {${field}}, which isn't one of its fields`,
+				);
+			}
+		}
+		return { definition, message };
+	});
+}
+
+function checkErrorFields(
+	definition: Definition,
+	fields: readonly string[],
+): void {
+	for (const field of fields) {
+		if (errorOwnFields.has(field)) {
+			throw new Error(
+				`${definition.name}.${field} would shadow Error.${field}; rename the field`,
+			);
+		}
+	}
 }
 
 /** What a procedure struct's `payload` and `success` refer to. */
@@ -161,20 +227,24 @@ function procedure(
 		return ref.slice(definitionRef.length);
 	};
 	const error = field("error");
-	const alternatives = Array.isArray(error.anyOf) ? error.anyOf : [error];
-	const [only] = alternatives;
+	const alternatives = (
+		Array.isArray(error.anyOf) ? error.anyOf : [error]
+	).map((alternative) => refName(alternative, "error"));
+	const [first, ...rest] = alternatives;
 	if (
-		alternatives.length !== 1 ||
-		definitions.get(refName(only, "error"))?.tag !== "InvalidRequest"
+		first === undefined ||
+		definitions.get(first)?.tag !== "InvalidRequest" ||
+		rest.some((name) => definitions.get(name)?.tag === undefined)
 	) {
 		throw new Error(
-			`${name}.error must be rfl::TaggedUnion<"_tag", InvalidRequest>: ` +
-				"a field's problems are issues, and anything else is a defect",
+			`${name}.error must be rfl::TaggedUnion<"_tag", InvalidRequest, …>: ` +
+				"a field's problems are issues, and every other error is tagged too",
 		);
 	}
 	return {
 		payload: refName(field("payload"), "payload"),
 		success: refName(field("success"), "success"),
+		errors: rest,
 	};
 }
 
@@ -232,13 +302,7 @@ function checkInvalidRequest(definition: Definition): void {
 	const fields = Object.keys(properties(definition)).filter(
 		(field) => field !== "_tag",
 	);
-	for (const field of fields) {
-		if (errorOwnFields.has(field)) {
-			throw new Error(
-				`${name}.${field} would shadow Error.${field}; rename the field`,
-			);
-		}
-	}
+	checkErrorFields(definition, fields);
 	const issues = properties(definition).issues;
 	const items = issues?.items;
 	if (

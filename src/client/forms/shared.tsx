@@ -12,7 +12,10 @@ import type {
 } from "react-hook-form";
 import { type FieldOf, fieldOf } from "../../shared/generated/protocol.ts";
 
-/** What a form's mutation fails with: its method's InvalidRequest, or the transport's error. */
+/**
+ * What a form's mutation fails with: its method's InvalidRequest, an error
+ * of something the BFF depends on, such as IoFailed, or the transport's.
+ */
 type Failure<Path extends ReadonlyArray<string | number>> =
 	| {
 			readonly _tag: "InvalidRequest";
@@ -21,6 +24,7 @@ type Failure<Path extends ReadonlyArray<string | number>> =
 				readonly message: string;
 			}>;
 	  }
+	| { readonly _tag: "IoFailed" | "CliFailed"; readonly message: string }
 	| RpcClientError.RpcClientError;
 
 /**
@@ -43,6 +47,8 @@ export function setFailure<Path extends ReadonlyArray<string | number>>(
 		setError("root.server", {
 			message: `Request failed: ${failure.value.message}`,
 		});
+	} else if (failure.value._tag !== "InvalidRequest") {
+		setError("root.server", { message: failure.value.message });
 	} else {
 		// The first issue per field, as the resolver does.
 		const named = new Set<string>();

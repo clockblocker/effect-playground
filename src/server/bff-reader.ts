@@ -1,6 +1,19 @@
 import { join } from "node:path";
-import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
-import { IssueMessage, ReadFile } from "../shared/generated/protocol.ts";
+import { getSystemErrorMessage } from "node:util";
+import {
+	Context,
+	Effect,
+	FileSystem,
+	Layer,
+	Option,
+	Path,
+	type PlatformError,
+} from "effect";
+import {
+	IoFailed,
+	IssueMessage,
+	ReadFile,
+} from "../shared/generated/protocol.ts";
 
 const invalidName = (
 	code: "NotTxtFile" | "LeavesFiles" | "FileNotFound",
@@ -15,6 +28,24 @@ const invalidName = (
 			},
 		],
 	});
+
+// What the system said, as custom_cat's reason is: the errno's message.
+const ioFailed = (
+	name: string,
+	error: Pick<PlatformError.PlatformError, "message" | "reason">,
+) => {
+	const cause = error.reason.cause;
+	const errno =
+		cause instanceof Error && "errno" in cause ? cause.errno : undefined;
+	return new IoFailed({
+		operation: "read",
+		file: name,
+		reason:
+			typeof errno === "number"
+				? getSystemErrorMessage(errno)
+				: error.message,
+	});
+};
 
 export class BffReader extends Context.Service<
 	BffReader,
@@ -65,9 +96,7 @@ export class BffReader extends Context.Service<
 							"NotFound",
 							() =>
 								Effect.fail(invalidName("FileNotFound", name)),
-							// Any other reason (permissions, a directory named x.txt) is
-							// a bug, not a case the client handles: make it a defect.
-							Effect.die,
+							(_, error) => Effect.fail(ioFailed(name, error)),
 						),
 					);
 					return { contents };

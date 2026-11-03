@@ -2,11 +2,8 @@
 //
 // Copies files/NAME to files/NAME, under the working directory, replacing
 // the output if it exists. The flags are protocol::CustomCatRequest, read by
-// reflect-cpp, which spells its fields in kebab-case. Exit codes:
-//   0  copied: CustomCatSuccess on stdout, as JSON
-//   1  a field is wrong: InvalidRequest on stdout, as JSON, with every issue
-//   2  a usage error that names no field, such as an unknown flag: on stderr
-//   3  anything else, such as a directory named x.txt: on stderr
+// reflect-cpp, which spells its fields in kebab-case. The README lists what
+// it prints and its exit codes.
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -17,7 +14,6 @@
 #include <iostream>
 #include <rfl/cli.hpp>
 #include <rfl/json.hpp>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -30,17 +26,23 @@ using namespace protocol;
 
 constexpr int exit_invalid = 1;
 constexpr int exit_usage = 2;
-constexpr int exit_defect = 3;
+constexpr int exit_io = 3;
+constexpr int exit_unexpected = 4;
 
-[[noreturn]] void fail(const std::string& what, const std::string& name,
+struct IoFailure {
+	IoFailed failed;
+};
+
+[[noreturn]] void fail(IoOperation operation, const std::string& name,
 						int error) {
-	throw std::runtime_error("cannot " + what + " " + in_files(name).string() +
-							 ": " + std::generic_category().message(error));
+	throw IoFailure{IoFailed{.operation = operation,
+							 .file = name,
+							 .reason = std::generic_category().message(error)}};
 }
 
 std::string read_file(const std::string& name) {
 	const int fd = ::open(in_files(name).c_str(), O_RDONLY | O_CLOEXEC);
-	if (fd < 0) fail("read", name, errno);
+	if (fd < 0) fail(IoOperation::read, name, errno);
 	std::string text;
 	char buffer[1 << 16];
 	while (true) {
@@ -50,7 +52,7 @@ std::string read_file(const std::string& name) {
 			if (errno == EINTR) continue;
 			const int error = errno;
 			::close(fd);
-			fail("read", name, error);
+			fail(IoOperation::read, name, error);
 		}
 		text.append(buffer, static_cast<std::size_t>(count));
 	}
@@ -73,11 +75,11 @@ void write_file(const std::string& name, const std::string& text) {
 	const auto target = in_files(name);
 	std::string temporary = (files / ".custom_cat-XXXXXX").string();
 	const int fd = ::mkstemp(temporary.data());
-	if (fd < 0) fail("write", name, errno);
+	if (fd < 0) fail(IoOperation::write, name, errno);
 	const auto give_up = [&](int error) {
 		::close(fd);
 		::unlink(temporary.c_str());
-		fail("write", name, error);
+		fail(IoOperation::write, name, error);
 	};
 	if (::fchmod(fd, mode_for(target)) != 0) give_up(errno);
 	for (std::size_t written = 0; written < text.size();) {
@@ -93,12 +95,12 @@ void write_file(const std::string& name, const std::string& text) {
 	if (::close(fd) != 0) {
 		const int error = errno;
 		::unlink(temporary.c_str());
-		fail("write", name, error);
+		fail(IoOperation::write, name, error);
 	}
 	if (::rename(temporary.c_str(), target.c_str()) != 0) {
 		const int error = errno;
 		::unlink(temporary.c_str());
-		fail("write", name, error);
+		fail(IoOperation::write, name, error);
 	}
 }
 
@@ -128,8 +130,11 @@ int main(int argc, char* argv[]) {
 		}
 		std::cout << rfl::json::write<Wire>(copy(*request)) << "\n";
 		return 0;
-	} catch (const std::exception& defect) {
-		std::cerr << "custom_cat: " << defect.what() << "\n";
-		return exit_defect;
+	} catch (const IoFailure& failure) {
+		std::cout << rfl::json::write<Wire>(Error(failure.failed)) << "\n";
+		return exit_io;
+	} catch (const std::exception& unexpected) {
+		std::cerr << "custom_cat: " << unexpected.what() << "\n";
+		return exit_unexpected;
 	}
 }

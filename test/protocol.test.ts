@@ -7,6 +7,7 @@ import { normalize } from "../scripts/protocol/normalize.ts";
 import {
 	CustomCat,
 	fieldOf,
+	IoFailed,
 	IssueCode,
 	IssueMessage,
 	ReadFile,
@@ -73,7 +74,9 @@ describe("generated protocol", () => {
 		const decode = Schema.decodeUnknownSync(ReadFile.Failure);
 		const invalid = decode(wire.invalidRequest);
 		expect(invalid).toBeInstanceOf(ReadFile.InvalidRequest);
-		expect(invalid.issues[0].path).toEqual(["name"]);
+		expect(
+			invalid._tag === "InvalidRequest" && invalid.issues[0].path,
+		).toEqual(["name"]);
 		expect(Schema.encodeSync(ReadFile.Failure)(invalid)).toEqual(
 			wire.invalidRequest,
 		);
@@ -82,6 +85,27 @@ describe("generated protocol", () => {
 			decode({
 				...wire.invalidRequest,
 				issues: [{ ...wire.invalidRequest.issues[0], code: "Odd" }],
+			}),
+		).toThrow();
+	});
+
+	test("IoFailed decodes into its class, whose message is its C++ template", () => {
+		const wireForm = {
+			_tag: "IoFailed",
+			operation: "write",
+			file: "x.txt",
+			reason: "Read-only file system",
+		} as const;
+		const failed = Schema.decodeUnknownSync(CustomCat.Failure)(wireForm);
+		expect(failed).toBeInstanceOf(IoFailed);
+		expect(failed.message).toBe(
+			`Couldn't write "x.txt": Read-only file system`,
+		);
+		expect(Schema.encodeSync(CustomCat.Failure)(failed)).toEqual(wireForm);
+		expect(() =>
+			Schema.decodeUnknownSync(IoFailed)({
+				...wireForm,
+				operation: "delete",
 			}),
 		).toThrow();
 	});
@@ -179,7 +203,12 @@ function fixture() {
 		properties: {
 			payload: { $ref: `#/$defs/a__${payload}` },
 			success: { $ref: `#/$defs/a__${success}` },
-			error: { anyOf: [{ $ref: "#/$defs/a__InvalidRequest__tagged" }] },
+			error: {
+				anyOf: [
+					{ $ref: "#/$defs/a__InvalidRequest__tagged" },
+					{ $ref: "#/$defs/a__Busy__tagged" },
+				],
+			},
 		},
 		required: ["payload", "success", "error"],
 	});
@@ -237,6 +266,15 @@ function fixture() {
 				},
 				required: ["code", "message", "path"],
 			},
+			a__Busy__tagged: {
+				type: "object",
+				properties: {
+					_tag: { type: "string", enum: ["Busy"] },
+					what: { type: "string", description: "What is busy." },
+					seconds: { type: "integer" },
+				},
+				required: ["_tag", "what", "seconds"],
+			},
 			a__InvalidRequest__tagged: {
 				type: "object",
 				properties: {
@@ -256,6 +294,9 @@ function fixture() {
 			Lowercase: { message: "Lowercase only", keyword: "pattern" },
 			// Backticks, $ and \ are literal text in the generated function.
 			Odd: { message: "`{value}` is odd; $ and \\ stay" },
+		} as Record<string, Record<string, unknown>>,
+		"x-errors": {
+			Busy: { message: "{what} is busy for {seconds}s" },
 		} as Record<string, Record<string, unknown>>,
 	};
 }
@@ -290,7 +331,7 @@ describe("emitter", () => {
 		);
 		expect(source).toContain("export const Success = Schema.Struct({");
 		expect(source).toContain(
-			"export const Failure = InvalidRequest;\nexport type Failure = InvalidRequest;",
+			"export const Failure = Schema.Union([InvalidRequest, Busy]);\nexport type Failure = InvalidRequest | Busy;",
 		);
 		expect(source).toContain("/** What the batch is called. */");
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
@@ -409,6 +450,44 @@ describe("emitter", () => {
 		);
 	});
 
+	test("declares each other error once, its message its template", async () => {
+		const source = emitted(fixture());
+		expect(source.match(/export class Busy /g)).toHaveLength(1);
+		expect(source.indexOf("export class Busy ")).toBeLessThan(
+			source.indexOf("export namespace"),
+		);
+		const { Busy, Get } = await load(fixture());
+		const busy = Schema.decodeUnknownSync(Get.Failure)({
+			_tag: "Busy",
+			what: "disk",
+			seconds: 3,
+		});
+		expect(busy).toBeInstanceOf(Busy);
+		expect(busy.message).toBe("disk is busy for 3s");
+	});
+
+	test("rejects an error without a template, or whose template names no field", () => {
+		const document = fixture();
+		document["x-errors"].Busy = { message: "{who} is busy" };
+		expect(() => normalize(document)).toThrow(
+			"Busy's message names {who}, which isn't one of its fields",
+		);
+		delete document["x-errors"].Busy;
+		expect(() => normalize(document)).toThrow(
+			'Busy has no message template in "x-errors"',
+		);
+	});
+
+	test("rejects an error field that would shadow Error's own", () => {
+		const document = fixture();
+		Object.assign(document.$defs.a__Busy__tagged?.properties as object, {
+			message: { type: "string" },
+		});
+		expect(() => normalize(document)).toThrow(
+			"Busy.message would shadow Error.message; rename the field",
+		);
+	});
+
 	test("rejects an error other than InvalidRequest", () => {
 		const document = fixture();
 		document.$defs.a__b__Get = {
@@ -419,7 +498,7 @@ describe("emitter", () => {
 			},
 		};
 		expect(() => normalize(document)).toThrow(
-			'Get.error must be rfl::TaggedUnion<"_tag", InvalidRequest>',
+			'Get.error must be rfl::TaggedUnion<"_tag", InvalidRequest, …>',
 		);
 	});
 

@@ -24,6 +24,9 @@
                     "anyOf": [
                         {
                             "$ref": "#/$defs/protocol__InvalidRequest__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/protocol__IoFailed__tagged"
                         }
                     ]
                 }
@@ -112,6 +115,39 @@
                 "issues"
             ]
         },
+        "protocol__IoFailed__tagged": {
+            "type": "object",
+            "properties": {
+                "_tag": {
+                    "type": "string",
+                    "enum": [
+                        "IoFailed"
+                    ]
+                },
+                "operation": {
+                    "type": "string",
+                    "description": "What was being done to the file.",
+                    "enum": [
+                        "read",
+                        "write"
+                    ]
+                },
+                "file": {
+                    "type": "string",
+                    "description": "The file, as the request names it."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "What the system said, such as \"Is a directory\"."
+                }
+            },
+            "required": [
+                "_tag",
+                "operation",
+                "file",
+                "reason"
+            ]
+        },
         "protocol__Issue": {
             "type": "object",
             "properties": {
@@ -168,6 +204,9 @@
                     "anyOf": [
                         {
                             "$ref": "#/$defs/protocol__InvalidRequest__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/protocol__IoFailed__tagged"
                         }
                     ]
                 }
@@ -246,6 +285,11 @@
         },
         "SameFileAsInput": {
             "message": "\"{value}\" is the input file under another name"
+        }
+    },
+    "x-errors": {
+        "IoFailed": {
+            "message": "Couldn't {operation} \"{file}\": {reason}"
         }
     }
 }

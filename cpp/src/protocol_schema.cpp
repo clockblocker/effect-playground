@@ -1,6 +1,7 @@
 // protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
 // emits, plus "x-issues": each issue code's message template, and for a rule
-// with a Schema, the keyword that carries its limit, such as "minLength".
+// with a Schema, the keyword that carries its limit, such as "minLength";
+// and "x-errors": the message template of each error that has one, by tag.
 // reflect-cpp only describes fields, and the rules live on types.
 
 #include <iostream>
@@ -76,6 +77,28 @@ Generic::Object issues(std::type_identity<std::tuple<Procedures...>>) {
 	return result;
 }
 
+template <class Error>
+void add_error(Generic::Object& errors) {
+	if constexpr (requires { Error::message; }) {
+		Generic::Object entry;
+		entry["message"] = std::string(Error::message);
+		errors[rfl::internal::tag_t<"_tag", Error>().str()] = entry;
+	}
+}
+
+template <rfl::internal::StringLiteral discriminator, class... Errors>
+void add_errors(std::type_identity<rfl::TaggedUnion<discriminator, Errors...>>,
+				Generic::Object& errors) {
+	(add_error<Errors>(errors), ...);
+}
+
+template <class... Procedures>
+Generic::Object errors(std::type_identity<std::tuple<Procedures...>>) {
+	Generic::Object result;
+	(add_errors(std::type_identity<decltype(Procedures::error)>(), result), ...);
+	return result;
+}
+
 }  // namespace
 
 int main() {
@@ -85,5 +108,7 @@ int main() {
 						.value();
 	object(document, "the schema")["x-issues"] =
 		issues(std::type_identity<Procedures>());
+	object(document, "the schema")["x-errors"] =
+		errors(std::type_identity<Procedures>());
 	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";
 }

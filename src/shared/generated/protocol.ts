@@ -58,6 +58,23 @@ export type FieldOf<P extends Segments> = P extends readonly [
 export const fieldOf = <const P extends Segments>(path: P): FieldOf<P> =>
 	path.join(".") as FieldOf<P>;
 
+/**
+ * An error that isn't about a field. Its message: Couldn't {operation}
+ * "{file}": {reason}
+ */
+export class IoFailed extends Schema.TaggedError<IoFailed>()("IoFailed", {
+	/** What was being done to the file. */
+	operation: Schema.Literals(["read", "write"]),
+	/** The file, as the request names it. */
+	file: Schema.String,
+	/** What the system said, such as "Is a directory". */
+	reason: Schema.String,
+}) {
+	override get message(): string {
+		return `Couldn't ${this.operation} "${this.file}": ${this.reason}`;
+	}
+}
+
 /** What the ReadFile method takes, succeeds with and fails with. */
 export namespace ReadFile {
 	/** What ReadFile takes. */
@@ -113,8 +130,8 @@ export namespace ReadFile {
 	}
 
 	/** What ReadFile fails with. */
-	export const Failure = InvalidRequest;
-	export type Failure = InvalidRequest;
+	export const Failure = Schema.Union([InvalidRequest, IoFailed]);
+	export type Failure = InvalidRequest | IoFailed;
 }
 
 /** What the CustomCat method takes, succeeds with and fails with. */
@@ -190,6 +207,6 @@ export namespace CustomCat {
 	}
 
 	/** What CustomCat fails with. */
-	export const Failure = InvalidRequest;
-	export type Failure = InvalidRequest;
+	export const Failure = Schema.Union([InvalidRequest, IoFailed]);
+	export type Failure = InvalidRequest | IoFailed;
 }

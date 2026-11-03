@@ -6,7 +6,8 @@
 //
 // - `Procedures` lists the procedures. A procedure's `payload` and `success`
 //   become `Request` and `Success` in a TypeScript namespace named after it.
-//   Its only error is InvalidRequest.
+//   Its `error` is InvalidRequest, then any error that isn't about a field,
+//   such as IoFailed, whose `message` template names its fields.
 // - A field's `rfl::Description` becomes its JSDoc.
 // - A request's field carries its rules in its type, a Checked<…> (see
 //   checked.hpp). Each failing rule becomes an Issue, with the rule's code and
@@ -186,7 +187,21 @@ struct ReadFileSuccess {
 	rfl::Description<"The whole file, decoded as UTF-8.", std::string> contents;
 };
 
-using Error = rfl::TaggedUnion<"_tag", InvalidRequest>;
+enum class IoOperation { read, write };
+
+// A file couldn't be read or written for a reason that isn't about its name,
+// such as a directory where a file should be, or a read-only disk.
+struct IoFailed {
+	static constexpr std::string_view message =
+		"Couldn't {operation} \"{file}\": {reason}";
+	rfl::Description<"What was being done to the file.", IoOperation> operation;
+	rfl::Description<"The file, as the request names it.", std::string> file;
+	rfl::Description<"What the system said, such as \"Is a directory\".",
+					 std::string>
+		reason;
+};
+
+using Error = rfl::TaggedUnion<"_tag", InvalidRequest, IoFailed>;
 
 // Never sent: it names what the procedure takes and returns.
 struct ReadFile {

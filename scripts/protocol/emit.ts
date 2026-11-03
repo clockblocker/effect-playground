@@ -1,6 +1,7 @@
 import { SchemaRepresentation } from "effect";
 import {
 	type Definition,
+	type ErrorTemplate,
 	type IssueTemplate,
 	type Procedure,
 	type Protocol,
@@ -13,10 +14,12 @@ import {
  *
  * Each procedure gets a TypeScript namespace of its own name. In it, its
  * payload is `Request` and its success `Success`; `Path` lists where in a
- * request a field is, `Issue` is a problem with one, and `InvalidRequest`,
- * its `Failure`, holds them. Every other definition only it uses keeps its
- * own name. A definition more than one procedure uses is declared once,
- * before the namespaces, as are the issue codes and their messages.
+ * request a field is, `Issue` is a problem with one, and `InvalidRequest`
+ * holds them. `Failure` is `InvalidRequest` or one of its other errors,
+ * such as `IoFailed`. Every other definition only it uses keeps its own
+ * name. A definition more than one procedure uses is declared once, before
+ * the namespaces, as are the issue codes and their messages, and the errors
+ * besides InvalidRequest.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -27,7 +30,18 @@ export function emit(
 	protocol: Protocol,
 	header: readonly string[],
 ): { readonly file: string; readonly source: string } {
-	const { namespace, procedures, definitions, issues } = protocol;
+	const { namespace, procedures, definitions, issues, errors } = protocol;
+	for (const { definition } of errors) {
+		if (
+			[...roleNames, ...topLevelNames].includes(
+				definition.name as (typeof roleNames)[number],
+			)
+		) {
+			throw new Error(
+				`${definition.name} would clash with the generated ${definition.name}; rename the struct`,
+			);
+		}
+	}
 
 	const uses = procedures.map((procedure) => ({
 		procedure,
@@ -80,6 +94,7 @@ export function emit(
 		...sharedNames.map((name) =>
 			declare(required(definitions, name), definitions, issues),
 		),
+		...errors.map((error) => errorDeclaration(error, definitions, issues)),
 		...uses.map(({ procedure, names }) =>
 			procedureNamespace(procedure, names, shared, protocol),
 		),
@@ -244,8 +259,44 @@ function procedureNamespace(
 		issueDeclaration(procedure, protocol.issue),
 		invalidRequestDeclaration(procedure, protocol.invalidRequest),
 		`/** What ${procedure.name} fails with. */`,
-		"export const Failure = InvalidRequest;",
-		"export type Failure = InvalidRequest;",
+		...(procedure.errors.length === 0
+			? [
+					"export const Failure = InvalidRequest;",
+					"export type Failure = InvalidRequest;",
+				]
+			: [
+					`export const Failure = Schema.Union([InvalidRequest, ${procedure.errors.join(", ")}]);`,
+					`export type Failure = InvalidRequest | ${procedure.errors.join(" | ")};`,
+				]),
+		"}",
+		"",
+	].join("\n");
+}
+
+/** A `TaggedError` whose message is its C++ template, over its fields. */
+function errorDeclaration(
+	{ definition, message }: ErrorTemplate,
+	definitions: ReadonlyMap<string, Definition>,
+	issues: readonly IssueTemplate[],
+): string {
+	const { name, tag = name } = definition;
+	const { _tag: _, ...properties } = definition.schema.properties as Record<
+		string,
+		unknown
+	>;
+	const fields = fieldsOf(
+		{ ...definition, schema: { ...definition.schema, properties } },
+		definitions,
+		issues,
+	);
+	return [
+		...jsDoc(`An error that isn't about a field. Its message: ${message}`),
+		`export class ${name} extends Schema.TaggedError<${name}>()(${JSON.stringify(tag)}, {`,
+		...fields,
+		"}) {",
+		"override get message(): string {",
+		`return ${templateCode(message, "this.")};`,
+		"}",
 		"}",
 		"",
 	].join("\n");
@@ -404,11 +455,11 @@ function declare(
 }
 
 /** `"{value}" is not a .txt file` → a template literal over `value`. */
-function templateCode(template: string): string {
+function templateCode(template: string, scope = ""): string {
 	const parts = template.split(placeholder);
 	const code = parts.map((part, index) =>
 		index % 2 === 1
-			? `\${${part}}`
+			? `\${${scope}${part}}`
 			: part
 					.replaceAll("\\", "\\\\")
 					.replaceAll("`", "\\`")

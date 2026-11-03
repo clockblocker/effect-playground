@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
-import { CustomCat } from "../src/shared/generated/protocol.ts";
+import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 
 // What the BFF decodes custom_cat's stdout with.
 const success = Schema.decodeUnknownSync(
@@ -21,6 +21,7 @@ const success = Schema.decodeUnknownSync(
 const invalidRequest = Schema.decodeUnknownSync(
 	Schema.fromJsonString(CustomCat.InvalidRequest),
 );
+const ioFailed = Schema.decodeUnknownSync(Schema.fromJsonString(IoFailed));
 
 let directory = "";
 
@@ -193,7 +194,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		);
 	});
 
-	test("reports a missing x.txt, but a directory named x.txt is a defect", async () => {
+	test("reports a missing x.txt as an issue, but a directory named x.txt as IoFailed", async () => {
 		const result = await customCat([
 			"--input-file=dir.txt",
 			"--output-file=copy.txt",
@@ -205,10 +206,11 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(again).toEqual({
-			stdout: "",
-			stderr: "custom_cat: cannot read files/dir.txt: Is a directory\n",
+			stdout: '{"_tag":"IoFailed","operation":"read","file":"dir.txt","reason":"Is a directory"}\n',
+			stderr: "",
 			exitCode: 3,
 		});
+		expect(ioFailed(again.stdout)).toBeInstanceOf(IoFailed);
 	});
 
 	test("refuses to copy a file onto itself", async () => {
@@ -317,11 +319,14 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--input-file=hello.txt",
 			"--output-file=copy.txt",
 		]);
-		expect(failed).toEqual({
-			stdout: "",
-			stderr: "custom_cat: cannot write files/copy.txt: Permission denied\n",
-			exitCode: 3,
-		});
+		expect(failed.exitCode).toBe(3);
+		expect(ioFailed(failed.stdout)).toEqual(
+			new IoFailed({
+				operation: "write",
+				file: "copy.txt",
+				reason: "Permission denied",
+			}),
+		);
 		expect(await file("copy.txt").text()).toBe("Old\n");
 	});
 
@@ -333,8 +338,12 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			"--output-file=out.txt",
 		]);
 		expect(failed.exitCode).toBe(3);
-		expect(failed.stderr).toStartWith(
-			"custom_cat: cannot write files/out.txt",
+		expect(ioFailed(failed.stdout)).toEqual(
+			new IoFailed({
+				operation: "write",
+				file: "out.txt",
+				reason: "Is a directory",
+			}),
 		);
 		expect(readdirSync(join(directory, "files")).sort()).toEqual([
 			"hello.txt",
