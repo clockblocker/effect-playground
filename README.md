@@ -8,7 +8,9 @@ A name must be 5 to 25 characters long. That rule lives on a C++ struct, and
 everything else gets it from the generated schema (see below).
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
-RPC and also serves a REST API (`effect/http-api`) for other clients.
+RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
+(`effect/ai`) whose one tool, `custom_cat`, runs the C++ executable of that
+name, which copies one `.txt` file to another.
 
 ## Prerequisites
 
@@ -25,20 +27,41 @@ bun install
 bun run dev
 ```
 
-Open <http://127.0.0.1:5200/>. `bun run dev` runs the BFF as
-`bun --watch src/server/main.ts` next to Vite. The BFF listens on 5201 and
-Vite proxies `/rpc` to it; the REST API is at `http://127.0.0.1:5201/api/…`.
+Open <http://127.0.0.1:5200/>. `bun run dev` builds `cpp/` if needed, then
+runs the BFF as `bun --watch src/server/main.ts` next to Vite. The BFF
+listens on 5201 and Vite proxies `/rpc` to it; the REST API is at
+`http://127.0.0.1:5201/api/…` and the MCP server at
+`http://127.0.0.1:5201/mcp`, which Vite doesn't proxy.
 `EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT` move those.
 
 Stop `bun run dev` with Ctrl-C, which signals every process in it. `bun run`
 doesn't forward SIGTERM to its children: `kill <pid of bun run dev>` leaves
 the BFF and Vite running.
 
-The read has one procedure and one endpoint:
+What each transport serves:
 
-- RPC, which the page uses: `ReadFile({ name })`, over `POST /rpc`.
+- RPC, which the page uses: `ReadFile({ name })` and
+  `CustomCat({ inputFile, outputFile })`, both over `POST /rpc`.
 - REST, for other clients: `GET /api/files/read/:name`. A client HttpApi
   derives from `BffApi` calls it as `client.files.read({ params: { name } })`.
+- MCP, for MCP clients: the `custom_cat` tool, over Streamable HTTP at
+  `/mcp`, protocol 2025-11-25 or 2025-06-18. Its parameters are
+  `CustomCat.Request`; a `NotTxtFile` or `FileNotFound` comes back as a tool
+  error whose text is the error's `message`.
+
+For example, after `initialize` (whose response carries `mcp-session-id`)
+and `notifications/initialized`:
+
+```sh
+curl http://127.0.0.1:5201/mcp \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -H "mcp-session-id: $session" -H 'mcp-protocol-version: 2025-11-25' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"custom_cat","arguments":{"inputFile":"hello.txt","outputFile":"copy.txt"}}}'
+```
+
+copies `files/hello.txt` to `files/copy.txt`, and its JSON-RPC `result` is
+`{"content":[{"type":"text","text":"{\"bytesCopied\":54}"}],"structuredContent":{"bytesCopied":54},"isError":false}`.
 
 ## `custom_cat`
 
@@ -66,7 +89,9 @@ follows the read's rules: both names are 5 to 25 characters, each must be
 
 stdout is JSON in the generated schemas' wire form: `CustomCat.Success` on
 0, `CustomCat.Failure` on 1. The message on stderr is the error's template
-from the C++ struct, filled in.
+from the C++ struct, filled in. The BFF's `CustomCatCli` runs it with Effect's
+`ChildProcess` and decodes stdout with those schemas, into a success or a
+typed failure; any other exit, or output that doesn't decode, is a defect.
 
 ## The protocol
 
@@ -121,6 +146,7 @@ error for it. Each boundary rejects it:
   request gets an `Exit` whose cause is a `Die` with the schema's message.
 - The page: its react-hook-form validates against the same field, so
   it shows the message under the input and never sends the request.
+- MCP: the tool's parameters don't decode, so the call is a tool error.
 - `custom_cat`: reflect-cpp rejects the flag, and it exits with 2.
 
 After changing the structs, run `bun run generate`: it rebuilds the C++,
@@ -134,11 +160,11 @@ committed. `bun run generate:check` fails if either is stale, or if
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
-bun run test             # builds the C++ and runs custom_cat
+bun run test             # builds the C++; runs custom_cat and the MCP server
 bun run generate:check
 ```
 
-The `custom_cat` tests skip when `cmake` isn't on the PATH.
+The tests that run `custom_cat` skip when `cmake` isn't on the PATH.
 
 ## Layout
 
@@ -146,8 +172,8 @@ The `custom_cat` tests skip when `cmake` isn't on the PATH.
   the schema. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import: the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and the generated protocol.
-- `src/server/` is the BFF: `BffReader`, and the two transports mounted on
-  one router.
+- `src/server/` is the BFF: `BffReader` and `CustomCatCli`, and the three
+  transports mounted on one router.
 - `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
   `BffRpcClient`. The client's runtime is an atom too, so the protocol is
   built once, not per submit. `main.tsx` wraps the page in
