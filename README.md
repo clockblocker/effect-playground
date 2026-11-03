@@ -149,5 +149,6 @@ The backend's integration tests skip when `cmake` isn't on the PATH.
   `bun run check` runs, for the page's RPC calls and the REST API's client.
 - `scripts/` builds the backend and runs the code generator.
 
-`@effect/platform-node-shared` is pinned to 4.0.0 only to match
-`effect` 4.0.0. Its 4.1 release imports modules that effect 4.0 lacks.
+`@effect/platform-node-shared` is pinned to 4.0.7 only to match
+`effect` 4.0.7. `@effect/platform-bun` asks for `^4.0.7`, which would pull in
+4.1, and 4.1 needs effect 4.1.
