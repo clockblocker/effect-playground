@@ -1,9 +1,11 @@
 # Effect playground
 
-A sandbox for learning Effect. Type a file name, submit, and the file's
-contents come back over Effect RPC (`effect/rpc`). Files live in `files/`. A
-name that isn't `.txt` fails with `NotTxtFile`; a missing `.txt` fails with
-`FileNotFound`.
+A sandbox for learning Effect. The page has two forms, and both talk to the
+BFF over Effect RPC (`effect/rpc`). In the first, type a file name, submit,
+and the file's contents come back. In the second, type an input and an
+output file, and `custom_cat` copies one to the other. Files live in
+`files/`. A name that isn't `.txt` fails with `NotTxtFile`; a missing input
+fails with `FileNotFound`.
 A name must be 5 to 25 characters long. That rule lives on a C++ struct, and
 everything else gets it from the generated schema (see below).
 
@@ -144,8 +146,8 @@ error for it. Each boundary rejects it:
   a client HttpApi derives fails with a `SchemaError` before sending anything.
 - RPC: the client can't encode the payload and dies before sending. A raw
   request gets an `Exit` whose cause is a `Die` with the schema's message.
-- The page: its react-hook-form validates against the same field, so
-  it shows the message under the input and never sends the request.
+- The page: each form's react-hook-form validates against the same field,
+  so it shows the message under that input and never sends the request.
 - MCP: the tool's parameters don't decode, so the call is a tool error.
 - `custom_cat`: reflect-cpp rejects the flag, and it exits with 2.
 
@@ -178,14 +180,17 @@ The tests that run `custom_cat` skip when `cmake` isn't on the PATH.
   `BffRpcClient`. The client's runtime is an atom too, so the protocol is
   built once, not per submit. `main.tsx` wraps the page in
   `@effect/atom-react`'s `RegistryProvider`, which holds the atoms.
-  `forms/read-file.tsx` is the read form: `App` passes it the generated
-  `ReadFile.Request` as its schema, which its react-hook-form resolver uses,
-  and it runs the read as a mutation, which holds an `AsyncResult` of the
-  success struct, failing with exactly the procedure's errors. A submit runs
-  the mutation and waits for it to settle, which keeps the button disabled
-  meanwhile. On failure the form shows `describeFailure`, which is the
-  error's own `message` for the domain errors and the client's wording for
-  the transport error, and a generic message for a defect.
+  `App` renders two forms, `forms/read-file.tsx` (`ReadFileForm`) and
+  `forms/run-cli.tsx` (`RunCliForm`), and passes each its schema, the
+  generated `ReadFile.Request` or `CustomCat.Request`, which its
+  react-hook-form resolver uses. Each runs its procedure as a mutation, which
+  holds an `AsyncResult` of the success struct, failing with exactly the
+  procedure's errors. A submit runs the mutation and waits for it to settle,
+  which keeps the button disabled meanwhile. `forms/shared.tsx` holds what
+  both use: the resolver hook, a text field with its error under it, and the
+  `AsyncResult` view. On failure that view shows `describeFailure`, which is
+  the error's own `message` for the domain errors and the client's wording
+  for the transport error, and a generic message for a defect.
 - `test/` holds the Bun tests.
 - `scripts/` builds the C++ and runs the code generator.
 

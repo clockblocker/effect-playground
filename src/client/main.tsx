@@ -8,7 +8,7 @@ const root = document.getElementById("root");
 if (root === null) throw new Error("#root is missing from index.html");
 
 // The registry holds the page's atoms: the RPC client's runtime and the
-// result of each read.
+// result of each form's mutation.
 createRoot(root).render(
 	<StrictMode>
 		<RegistryProvider>
