@@ -137,16 +137,23 @@ The backend's integration tests skip when `cmake` isn't on the PATH.
 - `src/server/` is the BFF: `BffReader` and `BackendReader`, and the two
   transports mounted on one router; each handler calls the reader its
   endpoint names.
-- `src/client/` builds the RPC client, `BffRpcClient`, with one call per
-  reader (`readers.bff`, `readers.backend`). Each returns the contents,
-  failing with exactly that call's errors. The form runs one through
-  `Effect.result` and renders the `Result`; on failure it shows
-  `describeFailure`, which is the error's own `message` for the domain errors
-  and the client's wording for the transport error. `App` builds the form
-  schema from the generated `ReadFile.Request` plus `Reader`, and passes it to
-  the panel, whose react-hook-form resolver uses it.
+- `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
+  `BffRpcClient`, with one mutation per reader (`reads.bff`,
+  `reads.backend`). Each holds an `AsyncResult` of the success struct,
+  failing with exactly that procedure's errors. The client's runtime is an
+  atom too, so the protocol is built once, not per submit. `main.tsx` wraps
+  the page in `@effect/atom-react`'s `RegistryProvider`, which holds the
+  atoms. A submit runs the switch's mutation and waits for it to settle,
+  which keeps the button disabled meanwhile; the page then shows that
+  mutation's result, so flipping the switch alone changes nothing. On failure
+  it shows `describeFailure`, which is the error's own `message` for the
+  domain errors and the client's wording for the transport error, and a
+  generic message for a defect. `App` builds the form schema from the
+  generated `ReadFile.Request` plus `Reader`, and passes it to the panel,
+  whose react-hook-form resolver uses it.
 - `test/` holds the Bun tests and `clients.types.ts`, type-level checks that
-  `bun run check` runs, for the page's RPC calls and the REST API's client.
+  `bun run check` runs, for the page's RPC mutations and the REST API's
+  client.
 - `scripts/` builds the backend and runs the code generator.
 
 `@effect/platform-node-shared` is pinned to 4.0.7 only to match

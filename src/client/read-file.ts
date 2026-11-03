@@ -1,28 +1,18 @@
-import { Effect, Match } from "effect";
-import type { ReadFile } from "../shared/generated/backend-protocol.ts";
+import { Match } from "effect";
+import type { Atom } from "effect/reactivity";
 import type { Reader } from "../shared/reader.ts";
 import { BffRpcClient } from "./clients.ts";
 
-// One call per reader. Each succeeds with the file's contents and fails with
-// exactly what it can fail with, so only the backend call lists
-// BackendUnavailable: hover one to see it.
-
-// RPC answers with the success struct; the page shows its contents.
-const contents = (success: ReadFile.Success) => success.contents;
-
-export const readers = {
-	bff: (name: string) =>
-		BffRpcClient.use((client) =>
-			Effect.map(client.ReadFileBff({ name }), contents),
-		),
-	backend: (name: string) =>
-		BffRpcClient.use((client) =>
-			Effect.map(client.ReadFileBackend({ name }), contents),
-		),
+// One mutation per reader. Each succeeds with the success struct and fails
+// with exactly what its procedure can fail with, so only the backend one
+// lists BackendUnavailable: hover one to see it.
+export const reads = {
+	bff: BffRpcClient.mutation("ReadFileBff"),
+	backend: BffRpcClient.mutation("ReadFileBackend"),
 };
 
-/** Whatever either call can fail with. */
-export type ReadFailure = Effect.Error<ReturnType<(typeof readers)[Reader]>>;
+/** Whatever either mutation can fail with. */
+export type ReadFailure = Atom.Failure<(typeof reads)[Reader]>;
 
 /**
  * What the page says when a call fails. The domain errors say it themselves;

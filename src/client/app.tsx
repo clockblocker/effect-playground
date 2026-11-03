@@ -1,12 +1,12 @@
+import { useAtom } from "@effect/atom-react";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
-import { Effect, Result, Schema } from "effect";
+import { Schema } from "effect";
+import { AsyncResult } from "effect/reactivity";
 import { useId, useMemo, useState } from "react";
 import { type UseFormRegisterReturn, useForm } from "react-hook-form";
 import { ReadFile } from "../shared/generated/backend-protocol.ts";
 import { Reader } from "../shared/reader.ts";
-import type { BffRpcClient } from "./clients.ts";
-import { runtime } from "./clients.ts";
-import { describeFailure, type ReadFailure, readers } from "./read-file.ts";
+import { describeFailure, type ReadFailure, reads } from "./read-file.ts";
 
 // What the form holds: the generated request, so the 5–25 rule and its
 // messages come from the C++ struct, plus which reader to send it to.
@@ -19,22 +19,16 @@ type ReadFileForm = typeof ReadFileForm;
 export function App() {
 	return (
 		<main className="panels">
-			<ReaderPanel schema={ReadFileForm} readers={readers} />
+			<ReaderPanel schema={ReadFileForm} />
 		</main>
 	);
 }
 
 function ReaderPanel({
 	schema,
-	readers,
 }: {
 	/** Validates the form; its type is the form's values. */
 	schema: ReadFileForm;
-	// One call per reader; the switch picks which one a submit makes.
-	readers: Record<
-		Reader,
-		(name: string) => Effect.Effect<string, ReadFailure, BffRpcClient>
-	>;
 }) {
 	// The types come from the schema, spelled out because inference through
 	// toStandardSchemaV1's intersection type yields `FieldValues` and `unknown`.
@@ -58,18 +52,25 @@ function ReaderPanel({
 			reader: "bff",
 		} satisfies ReadFileForm["Encoded"],
 	});
-	const [result, setResult] = useState<Result.Result<
-		string,
-		ReadFailure
-	> | null>(null);
+	// One mutation per reader; the switch picks which one a submit runs. In
+	// promiseExit mode a run resolves with its Exit once the result settles,
+	// failure or not, so isSubmitting covers the whole request.
+	const [bff, readBff] = useAtom(reads.bff, { mode: "promiseExit" });
+	const [backend, readBackend] = useAtom(reads.backend, {
+		mode: "promiseExit",
+	});
+	const run = { bff: readBff, backend: readBackend };
+	// The reader of the latest settled submit, so flipping the switch alone
+	// doesn't change what's shown. Before the first submit both are Initial.
+	const [shown, setShown] = useState<Reader>("bff");
+	const result: AsyncResult.AsyncResult<ReadFile.Success, ReadFailure> =
+		shown === "bff" ? bff : backend;
 	const nameError = useId();
 
 	// Runs only once the values pass the schema, so a bad name sends nothing.
-	const submit = handleSubmit(async (values) => {
-		// Effect.result turns a failure into a value, so this promise only
-		// rejects on a defect.
-		const read = readers[values.reader](values.name);
-		setResult(await runtime.runPromise(Effect.result(read)));
+	const submit = handleSubmit(async ({ reader, name }) => {
+		await run[reader]({ payload: { name } });
+		setShown(reader);
 	});
 
 	return (
@@ -91,13 +92,16 @@ function ReaderPanel({
 					</p>
 				)}
 			</form>
-			{result &&
-				Result.match(result, {
-					onSuccess: (contents) => <pre>{contents}</pre>,
-					onFailure: (error) => (
-						<p role="alert">{describeFailure(error)}</p>
-					),
-				})}
+			{AsyncResult.matchWithError(result, {
+				onInitial: () => null,
+				// RPC answers with the success struct; the page shows its contents.
+				onSuccess: ({ value }) => <pre>{value.contents}</pre>,
+				onError: (error) => (
+					<p role="alert">{describeFailure(error)}</p>
+				),
+				// No typed error in the cause: a defect or an interruption.
+				onDefect: () => <p role="alert">Something went wrong.</p>,
+			})}
 		</section>
 	);
 }
