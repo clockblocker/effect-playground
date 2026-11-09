@@ -13,7 +13,11 @@ import {
 } from "../../../helpers/procedure.ts";
 import * as Dto from "./custom-cat-dtos.ts";
 
-/** [CustomCat's DTOs](./custom-cat-dtos.ts), generated from [cpp/include/protocol/custom_cat.hpp](../../../../../cpp/include/protocol/custom_cat.hpp) by [scripts/generate.ts](../../../../../scripts/generate.ts). */
+/**
+Generated
+- from: src/shared/generated/cpp-side/custom-cat/custom-cat-dtos.ts
+- by: scripts/generate.ts
+*/
 export namespace CustomCat {
 	export const Request = Dto.Request;
 	export interface Request extends Schema.Schema.Type<typeof Request> {}

@@ -12,7 +12,11 @@ import {
 } from "../../../helpers/procedure.ts";
 import * as Dto from "./read-file-dtos.ts";
 
-/** [ReadFile's DTOs](./read-file-dtos.ts), generated from [src/server/bun-side/read-file/read-file-dtos.ts](../../../../server/bun-side/read-file/read-file-dtos.ts) by [scripts/generate.ts](../../../../../scripts/generate.ts). */
+/**
+Generated
+- from: src/shared/generated/bun-side/read-file/read-file-dtos.ts
+- by: scripts/generate.ts
+*/
 export namespace ReadFile {
 	export const Request = Dto.Request;
 	export interface Request extends Schema.Schema.Type<typeof Request> {}
