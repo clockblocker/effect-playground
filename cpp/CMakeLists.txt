@@ -23,12 +23,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(reflectcpp)
 
+# The bodies of what include/ declares, which every executable links: a
+# header there declares, and its .cpp here defines. Only templates, such as
+# run(), and types stay in the headers, which every file that uses them
+# must see.
+add_library(shared STATIC
+	src/files.cpp
+	src/protocol/names.cpp
+	src/protocol/wire.cpp
+)
+target_include_directories(shared PUBLIC include)
+target_link_libraries(shared PUBLIC reflectcpp)
+
 add_executable(custom_cat src/custom_cat.cpp)
 add_executable(custom_wc src/custom_wc.cpp)
 add_executable(protocol_schema src/protocol_schema.cpp)
 
 foreach(target custom_cat custom_wc protocol_schema)
-	target_include_directories(${target} PRIVATE include)
-	target_link_libraries(${target} PRIVATE reflectcpp)
+	target_link_libraries(${target} PRIVATE shared)
+endforeach()
+
+foreach(target shared custom_cat custom_wc protocol_schema)
 	target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
 endforeach()

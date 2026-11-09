@@ -240,7 +240,7 @@ An operation is four files' worth of steps, each in its own place:
 |---|---|---|
 | its contract: the request, its success, its output | `cpp/include/protocol/<operation>.hpp` | `CustomCatRequest`, `CustomCatSuccess`, `CustomCatOutput` |
 | the rules a field's type carries, which reach the TS form through the schema | `cpp/include/protocol/names.hpp` | both names are a `FileName` |
-| what only the files can say, and every touch of the disk | `cpp/include/files.hpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
+| what only the files can say, and every touch of the disk | `cpp/include/files.hpp`, with its bodies in `cpp/src/files.cpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
 | its check and its work | `cpp/src/<operation>.cpp` | `check()`, `copy()` |
 
 and `main` is one call, `protocol::run<Output, Request>(argc, argv, check,
@@ -467,11 +467,15 @@ type tests, which `bun run check` runs.
 
 ## Layout
 
-- `cpp/` holds the protocol in `include/protocol/`: a contract per
-  operation, `names.hpp` and `wire.hpp`; `files.hpp`, every touch of the
-  disk, and `run.hpp`, the steps every executable runs; in `src/`, each
-  executable's check and work, and the tool that emits the schema.
-  `cpp/build/` is ignored.
+- `cpp/` holds headers in `include/` and their bodies in `src/`: a header
+  declares, and its `.cpp` defines, except for types and templates, such as
+  `run()`, which every file that uses them must see. `include/protocol/` is
+  the protocol: a contract per operation, `names.hpp` and `wire.hpp`;
+  `include/files.hpp` is every touch of the disk, and `include/run.hpp` the
+  steps every executable runs. `src/` also holds each executable, its check
+  and its work, and the tool that emits the schema. CMake builds the bodies
+  once, as the `shared` library every executable links. `cpp/build/` is
+  ignored.
 - `src/shared/` is the contract the page and the BFF import, all of it
   generated or built on what is: the generated protocol, the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and `helpers/`: `tagged-errors.ts`,

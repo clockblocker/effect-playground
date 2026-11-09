@@ -2,14 +2,10 @@
 
 // What every operation's output shares, on the wire: an Issue, an
 // InvalidRequest of them, and IoFailed; and how a read's or a check's
-// failures become issues.
+// failures become issues. The bodies are in src/protocol/wire.cpp.
 
-#include <cctype>
-#include <cstddef>
 #include <rfl.hpp>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <variant>
 #include <vector>
 
@@ -46,69 +42,23 @@ struct IoFailed {
 		message;
 };
 
-// A field's name on the wire: reflect-cpp's CLI reader spells input_file
-// input-file, and its path segments with it.
-inline std::string wire_name(std::string_view name) {
-	std::string wire;
-	bool upper = false;
-	for (const char c : name) {
-		if (c == '-' || c == '_') {
-			upper = true;
-		} else {
-			wire += upper ? static_cast<char>(std::toupper(c)) : c;
-			upper = false;
-		}
-	}
-	return wire;
-}
-
-// An issue per failure in `error`, its message and its path.
-inline std::vector<Issue> issues(rfl::Error&& error) {
-	std::vector<Issue> issues;
-	for (auto& detail : std::move(error).details()) {
-		std::vector<PathSegment> path;
-		for (const auto& segment : detail.path) {
-			if (const auto* name = std::get_if<std::string>(&segment)) {
-				path.emplace_back(wire_name(*name));
-			} else {
-				path.emplace_back(static_cast<int>(std::get<std::size_t>(segment)));
-			}
-		}
-		issues.push_back(
-			Issue{.message = std::move(detail.message), .path = std::move(path)});
-	}
-	return issues;
-}
+// An issue per failure in `error`, its message and its path, the fields'
+// wire names, such as "inputFile", and an array's indexes as numbers.
+std::vector<Issue> issues(rfl::Error&& error);
 
 // The issues a check finds, each on a field by its C++ name, as reflect-cpp
 // reports a read's, so that run() reports both alike.
 class FieldIssues {
    public:
-	void add(std::string field, std::string message) {
-		details_.push_back(rfl::ErrorDetail{.path = {std::move(field)},
-											.message = std::move(message)});
-	}
-
-	bool empty() const noexcept { return details_.empty(); }
-
-	rfl::Unexpected<rfl::Error> error() const {
-		std::string what;
-		for (const auto& detail : details_) {
-			what += (what.empty() ? "" : "; ") + detail.message;
-		}
-		return rfl::error(rfl::Error(std::move(what), details_));
-	}
+	void add(std::string field, std::string message);
+	bool empty() const noexcept;
+	rfl::Unexpected<rfl::Error> error() const;
 
    private:
 	std::vector<rfl::ErrorDetail> details_;
 };
 
 // One issue, on the field `name`.
-inline rfl::Unexpected<rfl::Error> error_on(std::string name,
-											std::string message) {
-	FieldIssues issues;
-	issues.add(std::move(name), std::move(message));
-	return issues.error();
-}
+rfl::Unexpected<rfl::Error> error_on(std::string name, std::string message);
 
 }  // namespace protocol
