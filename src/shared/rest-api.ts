@@ -29,33 +29,37 @@ export class SearchFileSchemaErrors extends SchemaErrorsOf<SearchFileSchemaError
 	SearchFile,
 ) {}
 
-export class BffApi extends HttpApi.make("bff")
+// Each level owns its segment of the path: the API /api, the group /files,
+// and each endpoint its own, so ReadFile serves GET /api/files/read/:name.
+class FilesGroup extends HttpApiGroup.make("files")
 	.add(
-		HttpApiGroup.make("files")
-			.add(
-				HttpApiEndpoint.get("ReadFile", "/files/read/:name", {
-					params: ReadFile.RequestShape.fields,
-					success: Schema.String.pipe(HttpApiSchema.asText()),
-					error: errorsOf(ReadFile.Failure),
-				}),
-				HttpApiEndpoint.post("SearchFile", "/files/search", {
-					payload: SearchFile.RequestShape,
-					success: SearchFile.Success,
-					error: errorsOf(SearchFile.Failure),
-				}).middleware(SearchFileSchemaErrors),
-				HttpApiEndpoint.post("CustomCat", "/files/copy", {
-					payload: CustomCat.RequestShape,
-					success: CustomCat.Success,
-					error: errorsOf(CustomCat.Failure, CliFailed),
-				}).middleware(CustomCatSchemaErrors),
-				HttpApiEndpoint.post("CustomWc", "/files/count", {
-					payload: CustomWc.RequestShape,
-					success: CustomWc.Success,
-					error: errorsOf(CustomWc.Failure, CliFailed),
-				}).middleware(CustomWcSchemaErrors),
-			)
-			.prefix("/api"),
+		HttpApiEndpoint.get("ReadFile", "/read/:name", {
+			params: ReadFile.RequestShape.fields,
+			success: Schema.String.pipe(HttpApiSchema.asText()),
+			error: errorsOf(ReadFile.Failure),
+		}),
+		HttpApiEndpoint.post("SearchFile", "/search", {
+			payload: SearchFile.RequestShape,
+			success: SearchFile.Success,
+			error: errorsOf(SearchFile.Failure),
+		}).middleware(SearchFileSchemaErrors),
+		HttpApiEndpoint.post("CustomCat", "/copy", {
+			payload: CustomCat.RequestShape,
+			success: CustomCat.Success,
+			error: errorsOf(CustomCat.Failure, CliFailed),
+		}).middleware(CustomCatSchemaErrors),
+		HttpApiEndpoint.post("CustomWc", "/count", {
+			payload: CustomWc.RequestShape,
+			success: CustomWc.Success,
+			error: errorsOf(CustomWc.Failure, CliFailed),
+		}).middleware(CustomWcSchemaErrors),
 	)
+	.prefix("/files") {}
+
+// prefix applies to the groups added before it.
+export class BffApi extends HttpApi.make("bff")
+	.add(FilesGroup)
+	.prefix("/api")
 	.annotate(HttpApi.ParseOptions, {
 		errors: "all",
 		onExcessProperty: "error", // turn unknown field into errors
