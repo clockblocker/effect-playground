@@ -1,14 +1,41 @@
 // What every generated procedure's namespace builds the same way, from its
 // own Path, Success and errors. scripts/protocol/emit.ts writes the calls.
 
-import { type Cause, Schema } from "effect";
+import { type Cause, Predicate, Schema } from "effect";
+
+// Every procedure's InvalidRequest has this tag, on the wire and in C++: the
+// one place the TS says it.
+const invalidRequestTag = "InvalidRequest";
+
+/** A problem with one of a request's fields, whichever procedure's. */
+export interface AnyIssue {
+	readonly message: string;
+	readonly path: ReadonlyArray<string | number>;
+}
+
+/** Any procedure's InvalidRequest. */
+export interface AnyInvalidRequest {
+	readonly _tag: typeof invalidRequestTag;
+	readonly issues: ReadonlyArray<AnyIssue>;
+}
+
+/** Whether `u` is a procedure's InvalidRequest, whichever procedure's. */
+export const isInvalidRequest = (u: unknown): u is AnyInvalidRequest =>
+	Predicate.isTagged(u, invalidRequestTag);
+
+/** Whether an error class, a schema whose `_tag` is a literal, is a procedure's InvalidRequest. */
+export const isInvalidRequestClass = (error: {
+	readonly fields: {
+		readonly _tag: { readonly schema: { readonly literal: string } };
+	};
+}) => error.fields._tag.schema.literal === invalidRequestTag;
 
 /** A problem with a request: what is wrong, and where. */
 export const issueOf = <P extends Schema.Top>(path: P) =>
 	Schema.Struct({ message: Schema.String, path });
 
 type InvalidRequestSchema<I extends Schema.Top> = Schema.TaggedStruct<
-	"InvalidRequest",
+	typeof invalidRequestTag,
 	{ readonly issues: Schema.NonEmptyArray<I> }
 >;
 
@@ -27,7 +54,7 @@ export const InvalidRequestOf =
 		}
 		// TaggedError<Self> stays a conditional type while Self is a type
 		// parameter, so the class is typed by the return type instead.
-		const Base = Schema.TaggedError<Issues>()("InvalidRequest", {
+		const Base = Schema.TaggedError<Issues>()(invalidRequestTag, {
 			issues: Schema.NonEmptyArray(issue),
 		}) as unknown as new (
 			...args: never[]

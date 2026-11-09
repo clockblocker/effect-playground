@@ -271,9 +271,7 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 				).exit,
 			);
 			expect(defect.exitCode).toBe(1);
-			expect(defect.issue).toBe(
-				"exit 1 printed Success, not InvalidRequest",
-			);
+			expect(defect.issue).toBe("exit 1 printed Success, which exits 0");
 		});
 
 		test("prints a success without its tag", async () => {

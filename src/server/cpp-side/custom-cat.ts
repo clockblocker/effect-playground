@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { CustomCat } from "../../shared/generated/generated.ts";
-import type { CliFailed } from "../../shared/helpers/tagged-errors.ts";
+import type { CppSideFailure } from "../../shared/helpers/tagged-errors.ts";
 import { type CliOptions, cliRunner } from "./cli.ts";
 
 // Named for the CLI it runs: CustomCat is already the generated namespace.
@@ -9,15 +9,18 @@ export class CustomCatCli extends Context.Service<
 	{
 		readonly run: (
 			request: CustomCat.Request,
-		) => Effect.Effect<CustomCat.Success, CustomCat.Failure | CliFailed>;
+		) => Effect.Effect<
+			CustomCat.Success,
+			CppSideFailure<CustomCat.Failure>
+		>;
 	}
 >()("effect-playground/CustomCatCli") {
 	static layerWith(options: CliOptions) {
 		return Layer.effect(
 			CustomCatCli,
-			cliRunner<CustomCat.Request, typeof CustomCat.Output>(
+			cliRunner<CustomCat.Request, typeof CustomCat>(
 				"custom_cat",
-				CustomCat.Output,
+				CustomCat,
 				options,
 			).pipe(Effect.map((run) => CustomCatCli.of({ run }))),
 		);

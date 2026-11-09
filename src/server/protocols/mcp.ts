@@ -1,35 +1,41 @@
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
 import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
 import { fieldOf } from "../../shared/helpers/field-of.ts";
-import { CliFailed } from "../../shared/helpers/tagged-errors.ts";
+import { cppSideFailure } from "../../shared/helpers/tagged-errors.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
+type Issues = ReadonlyArray<{
+	readonly path: ReadonlyArray<string | number>;
+	readonly message: string;
+}>;
+
 // McpServer makes a failure's message the tool error's text, and an MCP
-// client has no form to put each issue under, so its text names each field.
-// Any other failure's message reads as it is.
-const fieldMessages = (
-	issues: ReadonlyArray<{
-		readonly path: ReadonlyArray<string | number>;
-		readonly message: string;
-	}>,
-) =>
-	issues
-		.map(({ path, message }) => `${fieldOf(path)}: ${message}`)
-		.join("\n");
-
-class CustomCatInvalidRequest extends CustomCat.InvalidRequest {
-	override get message(): string {
-		return fieldMessages(this.issues);
+// client has no form to put each issue under, so an operation's
+// InvalidRequest, whichever it is, names each field in its text. Any other
+// failure's message reads as it is.
+const forTool = <R, A, E>(
+	run: (request: R) => Effect.Effect<A, E>,
+	// biome-ignore lint/suspicious/noExplicitAny: a class to extend takes any arguments.
+	InvalidRequest: new (...args: any[]) => { readonly issues: Issues },
+) => {
+	class ToolInvalidRequest extends InvalidRequest {
+		get message(): string {
+			return this.issues
+				.map(({ path, message }) => `${fieldOf(path)}: ${message}`)
+				.join("\n");
+		}
 	}
-}
-
-class CustomWcInvalidRequest extends CustomWc.InvalidRequest {
-	override get message(): string {
-		return fieldMessages(this.issues);
-	}
-}
+	return (request: R) =>
+		run(request).pipe(
+			Effect.mapError((error) =>
+				error instanceof InvalidRequest
+					? (new ToolInvalidRequest({ issues: error.issues }) as E)
+					: error,
+			),
+		);
+};
 
 // By shape alone: the C++ checks the rules.
 const CustomCatTool = Tool.make("custom_cat", {
@@ -38,7 +44,7 @@ const CustomCatTool = Tool.make("custom_cat", {
 		"replacing it if it exists.",
 	parameters: CustomCat.RequestShape,
 	success: CustomCat.Success,
-	failure: Schema.Union([CustomCat.Failure, CliFailed]),
+	failure: cppSideFailure(CustomCat.Failure),
 });
 
 const CustomWcTool = Tool.make("custom_wc", {
@@ -46,7 +52,7 @@ const CustomWcTool = Tool.make("custom_wc", {
 		"Counts the lines, words and bytes of a .txt file in the files directory.",
 	parameters: CustomWc.RequestShape,
 	success: CustomWc.Success,
-	failure: Schema.Union([CustomWc.Failure, CliFailed]),
+	failure: cppSideFailure(CustomWc.Failure),
 });
 
 const Tools = Toolkit.make(CustomCatTool, CustomWcTool);
@@ -56,24 +62,8 @@ const ToolHandlers = Tools.toLayer(
 		const customCat = yield* CustomCatCli;
 		const customWc = yield* CustomWcCli;
 		return Tools.of({
-			custom_cat: (request) =>
-				customCat
-					.run(request)
-					.pipe(
-						Effect.catchTag("InvalidRequest", ({ issues }) =>
-							Effect.fail(
-								new CustomCatInvalidRequest({ issues }),
-							),
-						),
-					),
-			custom_wc: (request) =>
-				customWc
-					.run(request)
-					.pipe(
-						Effect.catchTag("InvalidRequest", ({ issues }) =>
-							Effect.fail(new CustomWcInvalidRequest({ issues })),
-						),
-					),
+			custom_cat: forTool(customCat.run, CustomCat.InvalidRequest),
+			custom_wc: forTool(customWc.run, CustomWc.InvalidRequest),
 		});
 	}),
 );

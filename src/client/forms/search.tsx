@@ -1,11 +1,10 @@
 import { useAtom } from "@effect/atom-react";
-import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { SearchFile } from "../../shared/generated/generated.ts";
 import { searchFile } from "../data-access/data-access.ts";
 import { Outcome } from "./shared/components/outcome.tsx";
 import { TextField } from "./shared/components/text-field.tsx";
-import { setIssues, useSchemaResolver } from "./shared/helpers.ts";
+import { issuesOf, setIssues, useSchemaResolver } from "./shared/helpers.ts";
 
 export function SearchForm({
 	schema,
@@ -25,15 +24,7 @@ export function SearchForm({
 	const [result, search] = useAtom(searchFile, { mode: "promiseExit" });
 
 	const submit = handleSubmit(async (payload) => {
-		const failure = Exit.findErrorOption(await search({ payload }));
-		if (Option.isSome(failure)) {
-			Match.valueTags(failure.value, {
-				InvalidRequest: ({ issues }) => setIssues(issues, setError),
-				// Outcome shows these.
-				IoFailed: () => undefined,
-				RpcClientError: () => undefined,
-			});
-		}
+		setIssues(issuesOf(await search({ payload })), setError);
 	});
 
 	return (

@@ -1,21 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Match, Schema } from "effect";
+import { Cause, Exit, Schema } from "effect";
 import { HttpClientError, HttpClientRequest } from "effect/http";
 import { AsyncResult } from "effect/reactivity";
 import { RpcClientError } from "effect/rpc";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ErrorOption } from "react-hook-form";
+import type { PageFailure } from "../src/client/data-access/data-access.ts";
 import { Outcome } from "../src/client/forms/shared/components/outcome.tsx";
-import { setIssues } from "../src/client/forms/shared/helpers.ts";
+import { issuesOf, setIssues } from "../src/client/forms/shared/helpers.ts";
 import { CustomCat } from "../src/shared/generated/generated.ts";
-import { CliFailed } from "../src/shared/helpers/tagged-errors.ts";
+import {
+	CliFailed,
+	type CppSideFailure,
+} from "../src/shared/helpers/tagged-errors.ts";
 
-/** What a copy's mutation fails with. */
-type CopyFailure =
-	| CustomCat.Failure
-	| CliFailed
-	| RpcClientError.RpcClientError;
+/** What a copy's mutation fails with: each hop's errors, core's first. */
+type CopyFailure = PageFailure<CppSideFailure<CustomCat.Failure>>;
 
 type Result = AsyncResult.AsyncResult<CustomCat.Success, CopyFailure>;
 
@@ -133,27 +134,22 @@ describe("Outcome", () => {
 	});
 });
 
-// Checked by `bun run check`: a handler too few, CliFailed's, and neither
-// matcher compiles.
-const rendered = (result: Result) =>
-	AsyncResult.builder(result)
-		.onInitial(() => "")
-		.onSuccess(() => "")
-		.onErrorTag("InvalidRequest", () => "")
-		.onErrorTag("IoFailed", () => "")
-		.onErrorTag("RpcClientError", () => "")
-		.onDefect(() => "")
-		.onInterrupt(() => "")
-		// @ts-expect-error CliFailed has no handler.
-		.exhaustive();
-const submitted = (failure: CopyFailure) =>
-	// @ts-expect-error CliFailed has no handler.
-	Match.valueTags(failure, {
-		InvalidRequest: () => "",
-		IoFailed: () => "",
-		RpcClientError: () => "",
+describe("issuesOf", () => {
+	test("gives an InvalidRequest's issues, typed by its operation's paths", () => {
+		const issues = issuesOf<CopyFailure>(Exit.fail(invalid));
+		expect(issues).toEqual(invalid.issues);
+		// Checked by `bun run check`: the paths are a copy's.
+		const path: CustomCat.Path = issues[0]?.path ?? [];
+		expect(path).toEqual(["outputFile"]);
 	});
 
-test("the matchers' types hold", () => {
-	expect([rendered, submitted]).toHaveLength(2);
+	test("gives nothing for a success or any other failure, which Outcome shows", () => {
+		expect(issuesOf(Exit.succeed({ bytesCopied: 6 }))).toEqual([]);
+		expect(
+			issuesOf<CopyFailure>(
+				Exit.fail(new CliFailed({ message: "gone" })),
+			),
+		).toEqual([]);
+		expect(issuesOf<CopyFailure>(Exit.die("broken"))).toEqual([]);
+	});
 });

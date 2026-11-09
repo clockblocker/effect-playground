@@ -1,6 +1,7 @@
 import { AsyncResult } from "effect/reactivity";
 import { RpcClientError } from "effect/rpc";
 import type { ReactNode } from "react";
+import { isInvalidRequest } from "../../../../shared/helpers/procedure.ts";
 
 interface Failure {
 	readonly _tag: string;
@@ -28,7 +29,7 @@ export function Outcome<A>({
 }
 
 function failureOf(error: Failure): ReactNode {
-	if (error._tag === "InvalidRequest") return null;
+	if (isInvalidRequest(error)) return null;
 	if (error instanceof RpcClientError.RpcClientError) {
 		return <Alert>{`Request failed: ${transportMessage(error)}`}</Alert>;
 	}

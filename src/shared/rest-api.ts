@@ -12,7 +12,8 @@ import {
 	SearchFile,
 } from "./generated/generated.ts";
 import { errorsOf, SchemaErrorsOf } from "./helpers/rest-errors.ts";
-import { CliFailed } from "./helpers/tagged-errors.ts";
+
+import { cppSideFailure } from "./helpers/tagged-errors.ts";
 
 export class CustomCatSchemaErrors extends SchemaErrorsOf<CustomCatSchemaErrors>()(
 	"effect-playground/CustomCatSchemaErrors",
@@ -46,12 +47,12 @@ class FilesGroup extends HttpApiGroup.make("files")
 		HttpApiEndpoint.post("CustomCat", "/copy", {
 			payload: CustomCat.RequestShape,
 			success: CustomCat.Success,
-			error: errorsOf(CustomCat.Failure, CliFailed),
+			error: errorsOf(cppSideFailure(CustomCat.Failure)),
 		}).middleware(CustomCatSchemaErrors),
 		HttpApiEndpoint.post("CustomWc", "/count", {
 			payload: CustomWc.RequestShape,
 			success: CustomWc.Success,
-			error: errorsOf(CustomWc.Failure, CliFailed),
+			error: errorsOf(cppSideFailure(CustomWc.Failure)),
 		}).middleware(CustomWcSchemaErrors),
 	)
 	.prefix("/files") {}

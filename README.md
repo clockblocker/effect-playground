@@ -94,13 +94,29 @@ error channel), a `Die` (a defect) or an `Interrupt`.
 - A timeout is `CliFailed` to the caller; inside the runner it interrupts
   the run, which kills the executable, as an abandoned call does.
 
+Each hop on the way to the page adds its own errors to an operation's, and
+each has a name for the result:
+
+| Hop | Its failure | Adds |
+|---|---|---|
+| core, a C++ executable or the BFF's own code | `CustomCat.Failure`, generated | the operation's `InvalidRequest` and other errors, such as `IoFailed` |
+| the BFF, running a C++ operation | `CppSideFailure<CustomCat.Failure>`, and `cppSideFailure(CustomCat.Failure)` as a schema, in `src/shared/helpers/tagged-errors.ts` | `CliFailed` |
+| the page, over RPC | `PageFailure<…>`, in `src/client/data-access/data-access.ts` | the transport's `RpcClientError` |
+
+The RPC group, the REST endpoints, the MCP tools and the CLI services all
+take a C++ operation's failure as `cppSideFailure`, and the RPC client adds
+`RpcClientError` itself, so `Atom.Failure<typeof customCat>` is already the
+page's. Code that treats an `InvalidRequest` apart, whichever operation's,
+asks `isInvalidRequest` or `isInvalidRequestClass`, in
+`src/shared/helpers/procedure.ts`, the one place the TS writes its tag.
+
 How each surfaces:
 
 | Bucket | RPC (the page) | REST | MCP |
 |---|---|---|---|
 | Shape | a raw request gets a `Die` | 422, the `InvalidRequest` as JSON | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
 | Rule, Precondition | `InvalidRequest`: each issue under its field; the form shows a rule's issue in Effect's words and sends nothing | 422, the `InvalidRequest` as JSON | a tool error, a line per issue: `outputFile: Must not be the input file` |
-| Dependency | the error's `message` as the root message | `IoFailed` 500, `CliFailed` 503, as JSON | a tool error whose text is the `message` |
+| Dependency | the error's `message` as the root message | 500 for an operation's error, such as `IoFailed`, 503 for `CliFailed`, as JSON | a tool error whose text is the `message` |
 | Transport | `Request failed: ` and its cause, such as `Transport error (POST …/rpc/)` | | |
 | Contract, Defect | `Something went wrong.` | an empty 500 | `Tool execution failed due to an internal server error.` |
 | Interruption | nothing | | |
@@ -240,10 +256,11 @@ TS: `Success`, `InvalidRequest` or `IoFailed`. The BFF runs each with one
 runner, `cliRunner` (`src/server/cpp-side/cli.ts`): the request's fields
 become its flags, `--input-file=…`, it runs in a scope whose end kills it
 (`SIGTERM`, then `SIGKILL` a second later), and its stdout is decoded once
-with the operation's `Output` and checked against the exit code's tag. A
-success comes back without its tag, and a failure fails. Exit 4 is a defect;
-any other code, output that doesn't decode, or a tag that isn't its exit
-code's is a `ContractMismatch`. Each operation's service is a few lines
+with the operation's `Output` and checked against `run.hpp`'s rule: exit 0
+prints the success, 1 the `InvalidRequest`, and 3 any other of its errors,
+whatever they are. A success comes back without its tag, and a failure
+fails. Exit 4 is a defect; any other code, output that doesn't decode, or a
+tag that doesn't go with its exit code is a `ContractMismatch`. Each operation's service is a few lines
 over it: `CustomCatCli` and `CustomWcCli`, whose
 `layerWith({ directory, binary, timeout })` sets where it runs, which
 executable it runs and how long it may take; the tests point `binary` at
@@ -399,13 +416,13 @@ and a file that doesn't exist with the system's message,
 `no such file or directory`.
 
 `src/shared/rest-api.ts` gives each endpoint `errorsOf(Operation.Failure)`,
-plus `CliFailed` for a C++ operation, and each endpoint with a JSON body a
-middleware, one line with `SchemaErrorsOf`, both in
-`src/shared/helpers/rest-errors.ts`. One table there gives each error its
-status by its tag: `InvalidRequest` 422, `IoFailed` 500 and `CliFailed`
-503. An endpoint's errors are its operation's, so an error a C++ operation
-gains is on its endpoint too, and one whose tag has no status doesn't
-compile until the table gives it one.
+or `errorsOf(cppSideFailure(Operation.Failure))` for a C++ operation, and
+each endpoint with a JSON body a middleware, one line with `SchemaErrorsOf`,
+both in `src/shared/helpers/rest-errors.ts`. Neither knows an operation's
+errors, only the hops': its `InvalidRequest` is 422, the client's fault,
+`CliFailed` 503, a service the BFF depends on failing, and any other of its
+errors 500, the server's. An endpoint's errors are its operation's, so an
+error an operation gains is on its endpoint too.
 
 `fieldOf(path)` (`src/shared/helpers/field-of.ts`) turns any operation's
 path into react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
@@ -469,21 +486,21 @@ type tests, which `bun run check` runs.
   struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
   a C++ operation) or the client's `RpcClientError`:
   `Atom.Failure<typeof customCat>`. `forms/shared/` holds what they all
-  use: in `components/`, `TextField`, a text field with its error under it,
-  and `Outcome`; in `helpers.ts`, the resolver hook, `FormFailure`, any
-  mutation's failure, and `setIssues`. A submit runs the mutation and waits for its `Exit`, which
-  keeps the button disabled meanwhile, and matches its error with
-  `Match.valueTags`: an `InvalidRequest` goes to `setIssues`, which puts the
-  first issue per field under it with
+  use, and knows no operation's errors: in `components/`, `TextField`, a
+  text field with its error under it, and `Outcome`; in `helpers.ts`, the
+  resolver hook, `issuesOf` and `setIssues`. A submit runs the mutation and
+  waits for its `Exit`, which keeps the button disabled meanwhile, and calls
+  `setIssues(issuesOf(exit), setError)`: `issuesOf` gives an
+  `InvalidRequest`'s issues, typed by the operation's paths, and nothing for
+  anything else, and `setIssues` puts the first issue per field under it with
   `setError(fieldOf(issue.path), { type: "server", message })`, where the
   resolver's errors go; react-hook-form drops it once the field changes and
   passes the resolver, or on the next submit. `Outcome` renders the
   mutation's `AsyncResult` with `AsyncResult.builder`, where the success
-  goes: the success, a Dependency's `message`, `Request failed: ` for the
-  transport, `Something went wrong.` for a defect, and nothing for an
+  goes: the success, `Something went wrong.` for a defect, nothing for an
   `InvalidRequest`, an interruption, or a failure while the next submit
-  waits. Both matchers are exhaustive (`exhaustive()`, and `valueTags` without
-  a fallback), so a new error doesn't compile until each handles it.
+  waits, `Request failed: ` for the transport, and any other failure's own
+  `message`, whichever operation's it is.
 - `test/` holds the Bun tests.
 - `scripts/` builds the C++ and runs the code generator.
 

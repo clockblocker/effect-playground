@@ -1,15 +1,28 @@
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
-import { Schema } from "effect";
+import { Exit, Option, Schema } from "effect";
 import { useMemo } from "react";
 import type { ErrorOption, FieldValues, Resolver } from "react-hook-form";
 import { type FieldOf, fieldOf } from "../../../shared/helpers/field-of.ts";
+import {
+	type AnyInvalidRequest,
+	type AnyIssue,
+	isInvalidRequest,
+} from "../../../shared/helpers/procedure.ts";
 
-interface FormIssue {
-	readonly message: string;
-	readonly path: ReadonlyArray<string | number>;
+type IssueOf<E> = Extract<E, AnyInvalidRequest>["issues"][number];
+
+// Outcome shows any other failure.
+export function issuesOf<E>(
+	exit: Exit.Exit<unknown, E>,
+): ReadonlyArray<IssueOf<E>> {
+	const failure = Exit.findErrorOption(exit);
+	if (Option.isNone(failure)) return [];
+	return isInvalidRequest(failure.value)
+		? (failure.value.issues as ReadonlyArray<IssueOf<E>>)
+		: [];
 }
 
-export function setIssues<I extends FormIssue>(
+export function setIssues<I extends AnyIssue>(
 	issues: ReadonlyArray<I>,
 	setError: (name: FieldOf<I["path"]>, error: ErrorOption) => void,
 ): void {

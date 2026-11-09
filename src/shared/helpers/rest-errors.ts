@@ -1,26 +1,19 @@
-// How the REST API answers an operation's errors: each with its tag's
-// status, from one table, so an endpoint lists its operation's Failure, not
-// each error by hand.
+// How the REST API answers an operation's errors, whatever they are, by the
+// layer they come from: its InvalidRequest is the client's fault; CliFailed,
+// the BFF failing to run a C++ operation, is a service it depends on
+// failing; and any other error, such as a disk that failed, is the server's.
+// An endpoint lists its operation's failure, not each error by hand.
 
 import type { Schema } from "effect";
 import { HttpApiMiddleware } from "effect/http-api";
+import { isInvalidRequestClass } from "./procedure.ts";
+import { CliFailed } from "./tagged-errors.ts";
 import { withStatus } from "./with-status.ts";
 
-const STATUS_CODE_FOR_TAG = {
-	InvalidRequest: 422, // The request's fields are wrong.
-	IoFailed: 500, // The disk failed, the BFF's or an executable's: not the client's fault.
-	CliFailed: 503, // A C++ operation is a service the BFF depends on, like a backend.
-} as const;
-
-/** An error class, whose tag has a status: a new tag doesn't compile until it has one. */
+/** An error class: a schema whose `_tag` field is a literal. */
 type Tagged = Schema.Top & {
-	readonly Type: { readonly _tag: keyof typeof STATUS_CODE_FOR_TAG };
 	readonly fields: {
-		readonly _tag: {
-			readonly schema: {
-				readonly literal: keyof typeof STATUS_CODE_FOR_TAG;
-			};
-		};
+		readonly _tag: { readonly schema: { readonly literal: string } };
 	};
 };
 
@@ -32,18 +25,18 @@ type WithStatus<S extends Schema.Top> = Schema.Codec<
 >;
 
 const withItsStatus = <S extends Tagged>(error: S): WithStatus<S> =>
-	withStatus(STATUS_CODE_FOR_TAG[error.fields._tag.schema.literal])(error);
+	withStatus(
+		isInvalidRequestClass(error)
+			? 422
+			: (error as Schema.Top) === CliFailed
+				? 503
+				: 500,
+	)(error);
 
-export const errorsOf = <
-	const Members extends ReadonlyArray<Tagged>,
-	const More extends ReadonlyArray<Tagged>,
->(
+export const errorsOf = <const Members extends ReadonlyArray<Tagged>>(
 	failure: Schema.Union<Members>,
-	...more: More
-): [
-	...{ readonly [K in keyof Members]: WithStatus<Members[K]> },
-	...{ readonly [K in keyof More]: WithStatus<More[K]> },
-] => [...failure.members, ...more].map(withItsStatus) as never;
+): { readonly [K in keyof Members]: WithStatus<Members[K]> } =>
+	failure.members.map(withItsStatus) as never;
 
 export const SchemaErrorsOf =
 	<Self>() =>

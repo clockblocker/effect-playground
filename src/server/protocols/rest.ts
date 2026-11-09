@@ -23,29 +23,39 @@ import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
 /**
- * Any request that doesn't decode, as the method's InvalidRequest. An issue
- * off the method's paths, such as an unknown field's, goes on the whole
- * request, its message saying where.
+ * Any request that doesn't decode, as the method's InvalidRequest, built with
+ * its own class. An issue off the method's paths, such as an unknown
+ * field's, goes on the whole request, its message saying where.
  */
-const asInvalidRequest = <I>(method: {
-	readonly InvalidRequest: Schema.Decoder<I>;
-	readonly Path: Schema.Top;
+const asInvalidRequest = <P, I>(method: {
+	readonly InvalidRequest: new (props: {
+		readonly issues: readonly [
+			{ readonly message: string; readonly path: P },
+			...Array<{ readonly message: string; readonly path: P }>,
+		];
+	}) => I;
+	readonly Path: Schema.Codec<P>;
 }) => {
-	const decode = Schema.decodeUnknownEffect(method.InvalidRequest);
-	const isPath: (path: unknown) => boolean = Schema.is(method.Path);
+	const isPath = Schema.is(method.Path);
+	const wholeRequest = Schema.decodeUnknownSync(method.Path)([]);
 	return (error: HttpApiError.HttpApiSchemaError) =>
-		decode({
-			_tag: "InvalidRequest",
-			issues: standardIssues(error.cause.issue).issues.map(
-				({ message, path = [] }) =>
-					isPath(path)
-						? { message, path }
-						: {
-								message: `${path.join(".")}: ${message}`,
-								path: [],
-							},
-			),
-		}).pipe(Effect.orDie, Effect.flip);
+		Effect.suspend(() => {
+			const [first, ...rest] = standardIssues(
+				error.cause.issue,
+			).issues.map(({ message, path = [] }) =>
+				isPath(path)
+					? { message, path }
+					: {
+							message: `${path.join(".")}: ${message}`,
+							path: wholeRequest,
+						},
+			);
+			return first === undefined
+				? Effect.die(error)
+				: Effect.fail(
+						new method.InvalidRequest({ issues: [first, ...rest] }),
+					);
+		});
 };
 
 const SchemaErrors = Layer.mergeAll(
