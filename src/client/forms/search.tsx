@@ -1,7 +1,7 @@
 import { useAtom } from "@effect/atom-react";
 import { useForm } from "react-hook-form";
 import type { SearchFile } from "../../shared/generated/generated.ts";
-import { searchFile } from "../data-access/data-access.ts";
+import { dataService } from "../data-access/data-access.ts";
 import { Outcome } from "./shared/components/outcome.tsx";
 import { TextField } from "./shared/components/text-field.tsx";
 import { issuesOf, setIssues, useSchemaResolver } from "./shared/helpers.ts";
@@ -21,7 +21,9 @@ export function SearchForm({
 		resolver: useSchemaResolver(schema),
 		defaultValues: { name: "hello.txt", query: "" },
 	});
-	const [result, search] = useAtom(searchFile, { mode: "promiseExit" });
+	const [result, search] = useAtom(dataService.mutation.searchFile, {
+		mode: "promiseExit",
+	});
 
 	const submit = handleSubmit(async (payload) => {
 		setIssues(issuesOf(await search({ payload })), setError);

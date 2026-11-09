@@ -1,7 +1,7 @@
 import { useAtom } from "@effect/atom-react";
 import { useForm } from "react-hook-form";
 import type { CustomCat } from "../../shared/generated/generated.ts";
-import { customCat } from "../data-access/data-access.ts";
+import { dataService } from "../data-access/data-access.ts";
 import { Outcome } from "./shared/components/outcome.tsx";
 import { TextField } from "./shared/components/text-field.tsx";
 import { issuesOf, setIssues, useSchemaResolver } from "./shared/helpers.ts";
@@ -21,7 +21,9 @@ export function RunCliForm({
 		resolver: useSchemaResolver(schema),
 		defaultValues: { inputFile: "", outputFile: "" },
 	});
-	const [result, run] = useAtom(customCat, { mode: "promiseExit" });
+	const [result, run] = useAtom(dataService.mutation.customCat, {
+		mode: "promiseExit",
+	});
 
 	const submit = handleSubmit(async (payload) => {
 		setIssues(issuesOf(await run({ payload })), setError);

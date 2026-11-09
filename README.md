@@ -105,8 +105,9 @@ each has a name for the result:
 
 The RPC group, the REST endpoints, the MCP tools and the CLI services all
 take a C++ operation's failure as `cppSideFailure`, and the RPC client adds
-`RpcClientError` itself, so `Atom.Failure<typeof customCat>` is already the
-page's. Code that treats an `InvalidRequest` apart, whichever operation's,
+`RpcClientError` itself, so
+`Atom.Failure<typeof dataService.mutation.customCat>` is already the page's.
+Code that treats an `InvalidRequest` apart, whichever operation's,
 asks `isInvalidRequest` or `isInvalidRequestClass`, in
 `src/shared/helpers/procedure.ts`, the one place the TS writes its tag.
 
@@ -473,8 +474,9 @@ type tests, which `bun run check` runs.
   mounts on one router.
 - `src/client/data-access/` builds the RPC client as `AtomRpc` atoms
   (`effect/reactivity`), `BffRpcClient` in `clients/bff-rpc-client.ts`, and
-  `data-access.ts` gives the forms a mutation per procedure, `readFile`,
-  `searchFile`, `customCat` and `customWc`.
+  `data-access.ts` gives the forms one facade, `dataService`, with a mutation
+  per procedure under `dataService.mutation`: `readFile`, `searchFile`,
+  `customCat` and `customWc`.
   The client's runtime is an atom too, so the protocol is built once, not per
   submit. `main.tsx` wraps the page in `@effect/atom-react`'s
   `RegistryProvider`, which holds the atoms. `App` renders four forms,
@@ -485,7 +487,7 @@ type tests, which `bun run check` runs.
   Each runs its procedure's mutation, which holds an `AsyncResult` of the success
   struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
   a C++ operation) or the client's `RpcClientError`:
-  `Atom.Failure<typeof customCat>`. `forms/shared/` holds what they all
+  `Atom.Failure<typeof dataService.mutation.customCat>`. `forms/shared/` holds what they all
   use, and knows no operation's errors: in `components/`, `TextField`, a
   text field with its error under it, and `Outcome`; in `helpers.ts`, the
   resolver hook, `issuesOf` and `setIssues`. A submit runs the mutation and

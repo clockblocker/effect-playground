@@ -1,7 +1,7 @@
 import { useAtom } from "@effect/atom-react";
 import { useForm } from "react-hook-form";
 import type { CustomWc } from "../../shared/generated/generated.ts";
-import { customWc } from "../data-access/data-access.ts";
+import { dataService } from "../data-access/data-access.ts";
 import { Outcome } from "./shared/components/outcome.tsx";
 import { TextField } from "./shared/components/text-field.tsx";
 import { issuesOf, setIssues, useSchemaResolver } from "./shared/helpers.ts";
@@ -21,7 +21,9 @@ export function CountForm({
 		resolver: useSchemaResolver(schema),
 		defaultValues: { file: "hello.txt" },
 	});
-	const [result, count] = useAtom(customWc, { mode: "promiseExit" });
+	const [result, count] = useAtom(dataService.mutation.customWc, {
+		mode: "promiseExit",
+	});
 
 	const submit = handleSubmit(async (payload) => {
 		setIssues(issuesOf(await count({ payload })), setError);
