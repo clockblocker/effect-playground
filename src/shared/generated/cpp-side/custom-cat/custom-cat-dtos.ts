@@ -1,6 +1,6 @@
 /*
 Generated
-- from: cpp/include/protocol/custom_cat.hpp
+- from: cpp/domain/protocol/custom_cat.hpp
 - by: scripts/generate.ts
 */
 

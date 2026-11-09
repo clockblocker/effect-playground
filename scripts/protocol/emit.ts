@@ -4,9 +4,9 @@ import type { Definition, Procedure, Protocol } from "./normalize.ts";
 
 /** Where the generated files come from and go, from the repository's root. */
 export interface Origin {
-	/** The header that lists the C++ operations, `cpp/include/protocol.hpp`. */
+	/** The header that lists the C++ operations, `cpp/domain/protocol.hpp`. */
 	readonly cpp: string;
-	/** The directory of each C++ operation's own header, `cpp/include/protocol`. */
+	/** The directory of each C++ operation's own header, `cpp/domain/protocol`. */
 	readonly cppHeaders: string;
 	/** The directory of the BFF operations, `src/server/bun-side`. */
 	readonly bunSide: string;

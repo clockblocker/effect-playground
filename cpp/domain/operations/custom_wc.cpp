@@ -1,10 +1,10 @@
-#include "operations/custom_wc.hpp"
+#include "domain/operations/custom_wc.hpp"
 
 #include <cctype>
 #include <cstdint>
 #include <string>
 
-#include "files.hpp"
+#include "domain/files.hpp"
 
 namespace custom_wc {
 

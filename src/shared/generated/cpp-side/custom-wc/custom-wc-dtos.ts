@@ -1,6 +1,6 @@
 /*
 Generated
-- from: cpp/include/protocol/custom_wc.hpp
+- from: cpp/domain/protocol/custom_wc.hpp
 - by: scripts/generate.ts
 */
 

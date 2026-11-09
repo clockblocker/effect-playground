@@ -1,4 +1,4 @@
-#include "protocol/names.hpp"
+#include "domain/protocol/names.hpp"
 
 namespace protocol {
 

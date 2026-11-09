@@ -1,12 +1,12 @@
-#include "core/json_rpc.hpp"
+#include "server/json_rpc.hpp"
 
 #include <exception>
 #include <rfl/json.hpp>
 #include <vector>
 
-#include "core/operation.hpp"
+#include "server/operations.hpp"
 
-namespace core::json_rpc {
+namespace server::json_rpc {
 namespace {
 
 // The envelopes, as reflect-cpp structs: field order is wire order.
@@ -161,4 +161,4 @@ std::optional<std::string> handle_frame(std::string_view frame,
 	return handle_message(*parsed, operations);
 }
 
-}  // namespace core::json_rpc
+}  // namespace server::json_rpc

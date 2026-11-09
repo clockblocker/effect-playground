@@ -11,7 +11,7 @@
 // core dies; the watchdog reads EOF, sends the child SIGTERM and, after a
 // second, SIGKILL. When the core exits normally, it kills the watchdog
 // first, so the watchdog never signals a pid that has been reaped and reused.
-namespace core::watchdog {
+namespace server::watchdog {
 
 struct Watchdog {
 	pid_t pid;
@@ -30,4 +30,4 @@ void watch(const Watchdog& watchdog, pid_t child);
 // Kills and reaps the watchdog, for a core that is about to exit.
 void stop(const Watchdog& watchdog);
 
-}  // namespace core::watchdog
+}  // namespace server::watchdog

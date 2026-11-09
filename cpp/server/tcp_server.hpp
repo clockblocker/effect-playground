@@ -2,11 +2,11 @@
 
 // Where the core listens for the BFF: 127.0.0.1, one newline-delimited
 // JSON-RPC frame at a time per connection. The bodies are in
-// src/core/tcp_server.cpp.
+// tcp_server.cpp.
 
 #include <cstdint>
 
-namespace core {
+namespace server {
 
 class Operations;
 
@@ -26,4 +26,4 @@ Listener listen_on_loopback(std::uint16_t port);
 void serve_in_background(Listener listener, const Operations& operations);
 
 }  // namespace tcp_server
-}  // namespace core
+}  // namespace server

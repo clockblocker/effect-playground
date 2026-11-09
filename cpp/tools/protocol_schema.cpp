@@ -1,11 +1,11 @@
-// protocol_schema: prints the JSON Schema of protocol.hpp, which reflect-cpp
-// emits.
+// protocol_schema: prints the JSON Schema of domain/protocol.hpp, which
+// reflect-cpp emits.
 
 #include <iostream>
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 
-#include "protocol.hpp"
+#include "domain/protocol.hpp"
 
 int main() {
 	const auto document =

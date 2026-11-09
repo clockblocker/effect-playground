@@ -2,7 +2,7 @@
 
 // The JSON-RPC 2.0 dialect of Effect's `RpcSerialization.layerNdJsonRpc()`,
 // server side. One JSON value per line, each way. The bodies are in
-// src/core/json_rpc.cpp.
+// json_rpc.cpp.
 //
 // Requests: {"jsonrpc":"2.0","id":1,"method":"CustomCat","params":{...}}.
 // Effect also sends "headers", "traceId", "spanId" and "sampled", which the
@@ -33,9 +33,9 @@
 #include <string>
 #include <string_view>
 
-#include "protocol/wire.hpp"
+#include "domain/protocol/wire.hpp"
 
-namespace core {
+namespace server {
 
 class Operations;
 
@@ -68,4 +68,4 @@ std::string fail(const rfl::Generic& id, const Error& error) {
 }
 
 }  // namespace json_rpc
-}  // namespace core
+}  // namespace server

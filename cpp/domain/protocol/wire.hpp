@@ -2,7 +2,7 @@
 
 // What every operation's output shares, on the wire: an Issue, an
 // InvalidRequest of them, and IoFailed; and how a read's or a check's
-// failures become issues. The bodies are in src/protocol/wire.cpp.
+// failures become issues. The bodies are in wire.cpp.
 
 #include <rfl.hpp>
 #include <string>
@@ -11,7 +11,7 @@
 
 namespace protocol {
 
-// snake_case here, camelCase in JSON: the schema, an executable's output and
+// snake_case here, camelCase in JSON: the schema, the core's answers and
 // an issue's path all pass it.
 using Wire = rfl::SnakeCaseToCamelCase;
 
@@ -51,7 +51,7 @@ std::string message_of(const IoFailed& error);
 std::vector<Issue> issues(rfl::Error&& error);
 
 // The issues a check finds, each on a field by its C++ name, as reflect-cpp
-// reports a read's, so that run() reports both alike.
+// reports a read's, so that the server answers both alike.
 class FieldIssues {
    public:
 	void add(std::string field, std::string message);

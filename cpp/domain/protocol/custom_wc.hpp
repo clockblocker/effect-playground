@@ -1,13 +1,13 @@
 #pragma once
 
-// custom_wc's contract: what it takes, as its flags, and what it prints.
-// What it checks and does is in src/custom_wc.cpp.
+// custom_wc's contract: what it takes, and what it answers.
+// What it checks and does is in domain/operations/custom_wc.hpp.
 
 #include <cstdint>
 #include <rfl.hpp>
 
-#include "names.hpp"
-#include "wire.hpp"
+#include "domain/protocol/names.hpp"
+#include "domain/protocol/wire.hpp"
 
 namespace protocol {
 
@@ -27,7 +27,7 @@ struct CustomWcSuccess {
 	rfl::Description<"How many bytes it holds.", std::uint64_t> bytes;
 };
 
-// What custom_wc prints, on exit 0, 1 and 3.
+// What custom_wc answers: its success, or what it fails with.
 using CustomWcOutput =
 	rfl::TaggedUnion<"_tag", CustomWcSuccess, InvalidRequest, IoFailed>;
 

@@ -1,6 +1,6 @@
 /*
 Generated
-- from: cpp/include/protocol.hpp, src/server/bun-side/
+- from: cpp/domain/protocol.hpp, src/server/bun-side/
 - by: scripts/generate.ts
 */
 

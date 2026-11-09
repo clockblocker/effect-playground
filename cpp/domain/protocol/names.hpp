@@ -13,7 +13,7 @@
 namespace protocol {
 
 // The code points of a UTF-8 string, or nothing if it isn't valid UTF-8. In
-// src/protocol/names.cpp.
+// names.cpp.
 std::optional<std::size_t> code_points(const std::string& value);
 
 // rfl::Size counts bytes, but the minLength and maxLength its schema emits

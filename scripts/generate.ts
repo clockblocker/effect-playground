@@ -23,8 +23,8 @@ const root = join(import.meta.dir, "..");
 const schemaPath = join(root, "cpp/protocol.schema.json");
 // Paths from the repository's root.
 const origin: Origin = {
-	cpp: "cpp/include/protocol.hpp",
-	cppHeaders: "cpp/include/protocol",
+	cpp: "cpp/domain/protocol.hpp",
+	cppHeaders: "cpp/domain/protocol",
 	bunSide: "src/server/bun-side",
 	by: "scripts/generate.ts",
 	into: "src/shared/generated",

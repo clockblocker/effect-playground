@@ -1,4 +1,4 @@
-#include "core/tcp_server.hpp"
+#include "server/tcp_server.hpp"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -13,9 +13,9 @@
 #include <functional>
 #include <thread>
 
-#include "core/json_rpc.hpp"
+#include "server/json_rpc.hpp"
 
-namespace core::tcp_server {
+namespace server::tcp_server {
 namespace {
 
 [[noreturn]] void throw_errno(const char* what) {
@@ -103,4 +103,4 @@ void serve_in_background(Listener listener, const Operations& operations) {
 	}).detach();
 }
 
-}  // namespace core::tcp_server
+}  // namespace server::tcp_server

@@ -32,7 +32,7 @@ follow the same rule.
 Who checks the rules depends on the operation:
 
 - `CustomCat`'s and `CustomWc`'s rules live on C++ types, each operation's in
-  its own header in `cpp/include/protocol/`. The page's forms check them with
+  its own header in `cpp/domain/protocol/`. The page's forms check them with
   the TypeScript schemas generated from them (see below), so they show
   Effect's own messages and send nothing that breaks one. The BFF checks a
   request's shape only and leaves the rules to the core, so every issue a
@@ -239,7 +239,7 @@ cpp/build/core -- bun --watch src/server/main.ts   # what bun run dev runs
 cpp/build/core                                     # serves alone, as the tests run it
 ```
 
-The core (`cpp/src/core.cpp`) serves the C++ operations over JSON-RPC on
+The core (`cpp/server/`) serves the C++ operations over JSON-RPC on
 127.0.0.1, in `files/` under its working directory, and launches its
 command, if it has one, with the port in `EFFECT_PLAYGROUND_CORE_PORT`. It
 logs `core: serving over JSON-RPC on 127.0.0.1:PORT` on stderr.
@@ -255,7 +255,7 @@ logs `core: serving over JSON-RPC on 127.0.0.1:PORT` on stderr.
   whitespace.
 
 The core speaks Effect's own JSON-RPC dialect, `RpcSerialization.layerNdJsonRpc()`,
-one JSON value per line each way (`cpp/include/core/json_rpc.hpp` says
+one JSON value per line each way (`cpp/server/json_rpc.hpp` says
 how): a success is the response's `result`, such as
 `{"jsonrpc":"2.0","id":1,"result":{"lines":2,"words":7,"bytes":40}}`, and a
 failure its `error`, an encoded Effect `Cause` of the operation's
@@ -267,19 +267,19 @@ An operation is four files' worth of steps, each in its own place:
 
 | Step | Where | For `custom_cat` |
 |---|---|---|
-| its contract: the request, its success, its output | `cpp/include/protocol/<operation>.hpp` | `CustomCatRequest`, `CustomCatSuccess`, `CustomCatOutput` |
-| the rules a field's type carries, which reach the TS form through the schema | `cpp/include/protocol/names.hpp` | both names are a `FileName` |
-| what only the files can say, and every touch of the disk | `cpp/include/files.hpp`, with its bodies in `cpp/src/files.cpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
-| its check and its work | `cpp/include/operations/<operation>.hpp`, with its bodies in `cpp/src/operations/` | `custom_cat::check()`, `custom_cat::copy()` |
+| its contract: the request, its success, its output | `cpp/domain/protocol/<operation>.hpp` | `CustomCatRequest`, `CustomCatSuccess`, `CustomCatOutput` |
+| the rules a field's type carries, which reach the TS form through the schema | `cpp/domain/protocol/names.hpp` | both names are a `FileName` |
+| what only the files can say, and every touch of the disk | `cpp/domain/files.hpp` and `files.cpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
+| its check and its work | `cpp/domain/operations/<operation>.hpp` and `.cpp` | `custom_cat::check()`, `custom_cat::copy()` |
 
-and the core serves it with one line, in `cpp/src/core.cpp`:
+and the core serves it with one line, in `cpp/server/main.cpp`:
 
 ```cpp
 operations.add<protocol::CustomCat>(custom_cat::check, custom_cat::copy);
 ```
 
 under its procedure's name, `CustomCat`, as the generated `CoreRpcs` calls
-it. `core::Operations` (`cpp/include/core/operation.hpp`) runs it for a
+it. `server::Operations` (`cpp/server/operations.hpp`) runs it for a
 request in its steps:
 
 1. read: reflect-cpp reads the request from the request's params, with the
@@ -305,10 +305,10 @@ failure, or a call it doesn't answer in five seconds, into
 
 ## The protocol
 
-Each C++ operation has a header of its own, `cpp/include/protocol/custom_cat.hpp`
+Each C++ operation has a header of its own, `cpp/domain/protocol/custom_cat.hpp`
 and `custom_wc.hpp`, which declares its request and output, and nothing
-else; what every output shares is in `cpp/include/protocol/wire.hpp`, and
-the name rules in `names.hpp`. `cpp/include/protocol.hpp`
+else; what every output shares is in `cpp/domain/protocol/wire.hpp`, and
+the name rules in `names.hpp`. `cpp/domain/protocol.hpp`
 includes them all and lists them in `Procedures`, which is what the
 generator reads. A procedure's `output` is a tagged union of its success,
 whose `using Tag = rfl::Literal<"Success">` names it, `InvalidRequest`, a
@@ -489,17 +489,22 @@ type tests, which `bun run check` runs.
 
 ## Layout
 
-- `cpp/` holds headers in `include/` and their bodies in `src/`: a header
-  declares, and its `.cpp` defines, except for types and templates, such as
-  `Operations::add`, which every file that uses them must see.
-  `include/protocol/` is the protocol: a contract per operation, `names.hpp`
-  and `wire.hpp`; `include/operations/` each operation's check and work;
-  `include/files.hpp` is every touch of the disk; and `include/core/` the
-  core's own parts: `Operations`, the JSON-RPC dialect, the TCP server and
-  the watchdog. `src/core.cpp` is the core's `main`, and
-  `src/protocol_schema.cpp` the tool that emits the schema. CMake builds the
-  bodies the two share once, as the `shared` library. `cpp/build/` is
-  ignored.
+- `cpp/` is in two halves, and `server/` uses `domain/`, never the reverse:
+  - `domain/` is what the operations are and do, with no sockets,
+    processes or JSON-RPC: `protocol.hpp`, the list of operations the
+    generator reads, and `protocol/`, their contracts, `names.hpp` and
+    `wire.hpp`; `operations/`, each one's check and work; and `files.hpp`,
+    every touch of the disk. CMake builds it as the `domain` library.
+  - `server/` is the core, how it serves them: `main.cpp`, which operations
+    it serves, then listen, launch, supervise; `operations.hpp`, the table
+    of them and one's steps for a request; `json_rpc.hpp`, Effect's dialect;
+    `tcp_server.hpp`; `launcher.hpp`, spawning the BFF, forwarding signals
+    and waiting for it; and `watchdog.hpp`.
+  - `tools/protocol_schema.cpp` emits the schema.
+
+  Each `.hpp` declares and the `.cpp` beside it defines; only types and
+  templates, such as `Operations::add`, stay in headers, which every file
+  that uses them must see. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import, all of it
   generated or built on what is: the generated protocol, the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and `helpers/`: `tagged-errors.ts`,

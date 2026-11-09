@@ -1,4 +1,4 @@
-#include "core/watchdog.hpp"
+#include "server/watchdog.hpp"
 
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -9,7 +9,7 @@
 #include <ctime>
 #include <system_error>
 
-namespace core::watchdog {
+namespace server::watchdog {
 namespace {
 
 constexpr int grace_steps = 20;
@@ -98,4 +98,4 @@ void stop(const Watchdog& watchdog) {
 	::close(watchdog.fd);
 }
 
-}  // namespace core::watchdog
+}  // namespace server::watchdog

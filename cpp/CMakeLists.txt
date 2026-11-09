@@ -23,36 +23,38 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(reflectcpp)
 
-# The bodies of what include/ declares, which every executable links: a
-# header there declares, and its .cpp here defines. Only templates, such as
-# Operations::add, and types stay in the headers, which every file that uses
-# them must see.
-add_library(shared STATIC
-	src/files.cpp
-	src/operations/custom_cat.cpp
-	src/operations/custom_wc.cpp
-	src/protocol/names.cpp
-	src/protocol/wire.cpp
+# What the operations are and do, with no sockets, processes or JSON-RPC:
+# their contracts, their checks and work, and the disk. Each header there
+# declares, and the .cpp beside it defines; only types and templates stay in
+# headers, which every file that uses them must see.
+add_library(domain STATIC
+	domain/files.cpp
+	domain/operations/custom_cat.cpp
+	domain/operations/custom_wc.cpp
+	domain/protocol/names.cpp
+	domain/protocol/wire.cpp
 )
-target_include_directories(shared PUBLIC include)
-target_link_libraries(shared PUBLIC reflectcpp)
+target_include_directories(domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(domain PUBLIC reflectcpp)
 
 find_package(Threads REQUIRED)
 
-# The core: serves the operations over JSON-RPC, and launches the BFF.
+# The core: how it serves the domain's operations over JSON-RPC, and
+# launches the BFF.
 add_executable(core
-	src/core.cpp
-	src/core/json_rpc.cpp
-	src/core/operation.cpp
-	src/core/tcp_server.cpp
-	src/core/watchdog.cpp
+	server/json_rpc.cpp
+	server/launcher.cpp
+	server/main.cpp
+	server/operations.cpp
+	server/tcp_server.cpp
+	server/watchdog.cpp
 )
-target_link_libraries(core PRIVATE shared Threads::Threads)
+target_link_libraries(core PRIVATE domain Threads::Threads)
 
 # Prints the protocol's JSON Schema, which bun run generate reads.
-add_executable(protocol_schema src/protocol_schema.cpp)
-target_link_libraries(protocol_schema PRIVATE shared)
+add_executable(protocol_schema tools/protocol_schema.cpp)
+target_link_libraries(protocol_schema PRIVATE domain)
 
-foreach(target shared core protocol_schema)
+foreach(target domain core protocol_schema)
 	target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
 endforeach()

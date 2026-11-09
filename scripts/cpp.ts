@@ -7,11 +7,11 @@ const build = join(source, "build");
 
 /**
  * The C++ core, which serves the C++ operations over JSON-RPC and launches
- * the command after `--`, the BFF; see `cpp/src/core.cpp`.
+ * the command after `--`, the BFF; see `cpp/server/main.cpp`.
  */
 export const coreBinary = join(build, "core");
 
-/** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
+/** Prints the JSON Schema of `cpp/domain/protocol.hpp`. */
 export const protocolSchemaBinary = join(build, "protocol_schema");
 
 /**

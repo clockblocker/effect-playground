@@ -2,11 +2,11 @@
 
 // custom_cat's check and its work, which the core runs for a CustomCat
 // request. Its contract is protocol/custom_cat.hpp; the bodies are in
-// src/operations/custom_cat.cpp.
+// custom_cat.cpp.
 
 #include <rfl.hpp>
 
-#include "protocol/custom_cat.hpp"
+#include "domain/protocol/custom_cat.hpp"
 
 namespace custom_cat {
 

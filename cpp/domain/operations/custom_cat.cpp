@@ -1,8 +1,8 @@
-#include "operations/custom_cat.hpp"
+#include "domain/operations/custom_cat.hpp"
 
 #include <string>
 
-#include "files.hpp"
+#include "domain/files.hpp"
 
 namespace custom_cat {
 

@@ -1,6 +1,6 @@
 import { type JsonSchema, Predicate } from "effect";
 
-/** A struct from `cpp/include/protocol.hpp`, under its C++ name. */
+/** A struct from `cpp/domain/protocol.hpp`, under its C++ name. */
 export interface Definition {
 	readonly name: string;
 	/** The JSON Schema, with `$ref`s renamed, descriptions removed and objects closed. */

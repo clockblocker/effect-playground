@@ -12,7 +12,7 @@ import {
 } from "../../../helpers/procedure.ts";
 import * as Dto from "./custom-wc-dtos.ts";
 
-/** [CustomWc's DTOs](./custom-wc-dtos.ts), generated from [cpp/include/protocol/custom_wc.hpp](../../../../../cpp/include/protocol/custom_wc.hpp) by [scripts/generate.ts](../../../../../scripts/generate.ts). */
+/** [CustomWc's DTOs](./custom-wc-dtos.ts), generated from [cpp/domain/protocol/custom_wc.hpp](../../../../../cpp/domain/protocol/custom_wc.hpp) by [scripts/generate.ts](../../../../../scripts/generate.ts). */
 export namespace CustomWc {
 	export const Request = Dto.Request;
 	export interface Request extends Schema.Schema.Type<typeof Request> {}

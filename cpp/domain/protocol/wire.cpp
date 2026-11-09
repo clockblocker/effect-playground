@@ -1,4 +1,4 @@
-#include "protocol/wire.hpp"
+#include "domain/protocol/wire.hpp"
 
 #include <cctype>
 #include <cstddef>

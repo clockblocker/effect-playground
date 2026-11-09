@@ -18,11 +18,11 @@
 #include <string>
 #include <utility>
 
-#include "core/json_rpc.hpp"
-#include "files.hpp"
-#include "protocol/wire.hpp"
+#include "server/json_rpc.hpp"
+#include "domain/files.hpp"
+#include "domain/protocol/wire.hpp"
 
-namespace core {
+namespace server {
 
 // What answers a request: its id and params → the response line.
 using Handler =
@@ -72,4 +72,4 @@ void Operations::add(auto check, auto act) {
 	};
 }
 
-}  // namespace core
+}  // namespace server

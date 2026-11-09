@@ -1,6 +1,6 @@
 /*
 Generated
-- from: cpp/include/protocol.hpp
+- from: cpp/domain/protocol.hpp
 - by: scripts/generate.ts
 */
 

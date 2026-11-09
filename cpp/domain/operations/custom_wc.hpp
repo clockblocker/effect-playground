@@ -2,11 +2,11 @@
 
 // custom_wc's check and its work, which the core runs for a CustomWc
 // request. Its contract is protocol/custom_wc.hpp; the bodies are in
-// src/operations/custom_wc.cpp.
+// custom_wc.cpp.
 
 #include <rfl.hpp>
 
-#include "protocol/custom_wc.hpp"
+#include "domain/protocol/custom_wc.hpp"
 
 namespace custom_wc {
 

@@ -1,13 +1,13 @@
 #pragma once
 
-// custom_cat's contract: what it takes, as its flags, and what it prints.
-// What it checks and does is in src/custom_cat.cpp.
+// custom_cat's contract: what it takes, and what it answers.
+// What it checks and does is in domain/operations/custom_cat.hpp.
 
 #include <cstdint>
 #include <rfl.hpp>
 
-#include "names.hpp"
-#include "wire.hpp"
+#include "domain/protocol/names.hpp"
+#include "domain/protocol/wire.hpp"
 
 namespace protocol {
 
@@ -29,7 +29,7 @@ struct CustomCatSuccess {
 		bytes_copied;
 };
 
-// What custom_cat prints, on exit 0, 1 and 3.
+// What custom_cat answers: its success, or what it fails with.
 using CustomCatOutput =
 	rfl::TaggedUnion<"_tag", CustomCatSuccess, InvalidRequest, IoFailed>;
 

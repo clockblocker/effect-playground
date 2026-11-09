@@ -1,13 +1,13 @@
 #pragma once
 
-// Everything the executables do with the disk, all in files/ under the
+// Everything the operations do with the disk, all in files/ under the
 // working directory, and only for a name protocol::FileName accepts. The
-// bodies are in src/files.cpp.
+// bodies are in files.cpp.
 
 #include <optional>
 #include <string>
 
-#include "protocol/wire.hpp"
+#include "domain/protocol/wire.hpp"
 
 namespace files {
 
@@ -25,8 +25,8 @@ std::optional<std::string> missing_issue(const std::string& name);
 // Whether two names are one file, such as through a hard link.
 bool same_file(const std::string& first, const std::string& second);
 
-// What an operation does with the files: each throws IoFailure, which run()
-// prints as IoFailed, when the system fails.
+// What an operation does with the files: each throws IoFailure, which the
+// server answers as IoFailed, when the system fails.
 
 struct IoFailure {
 	protocol::IoFailed failed;

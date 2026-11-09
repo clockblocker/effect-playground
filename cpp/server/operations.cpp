@@ -1,10 +1,10 @@
-#include "core/operation.hpp"
+#include "server/operations.hpp"
 
-namespace core {
+namespace server {
 
 const Handler* Operations::find(const std::string& method) const {
 	const auto found = handlers_.find(method);
 	return found == handlers_.end() ? nullptr : &found->second;
 }
 
-}  // namespace core
+}  // namespace server
