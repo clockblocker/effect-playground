@@ -1,20 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Match } from "effect";
+import { Cause, Match, Schema } from "effect";
 import { HttpClientError, HttpClientRequest } from "effect/http";
 import { AsyncResult } from "effect/reactivity";
 import { RpcClientError } from "effect/rpc";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ErrorOption } from "react-hook-form";
-import {
-	type FormFailure,
-	Outcome,
-	setIssues,
-} from "../src/client/forms/shared.tsx";
+import { Outcome } from "../src/client/forms/shared/components/outcome.tsx";
+import { setIssues } from "../src/client/forms/shared/helpers.ts";
 import { CustomCat } from "../src/shared/generated/generated.ts";
 import { CliFailed } from "../src/shared/helpers/tagged-errors.ts";
 
-type Result = AsyncResult.AsyncResult<CustomCat.Success, FormFailure>;
+/** What a copy's mutation fails with. */
+type CopyFailure =
+	| CustomCat.Failure
+	| CliFailed
+	| RpcClientError.RpcClientError;
+
+type Result = AsyncResult.AsyncResult<CustomCat.Success, CopyFailure>;
 
 /** What Outcome renders for a copy's result. */
 const shown = (result: Result) =>
@@ -25,7 +28,7 @@ const shown = (result: Result) =>
 		}),
 	);
 
-const failed = (cause: Cause.Cause<FormFailure>) =>
+const failed = (cause: Cause.Cause<CopyFailure>) =>
 	shown(AsyncResult.failure(cause));
 
 const invalid = new CustomCat.InvalidRequest({
@@ -86,6 +89,22 @@ describe("Outcome", () => {
 		).toBe(`<p role="alert">custom_cat timed out after 5000 ms</p>`);
 	});
 
+	test("shows any other failure by its message, whatever its operation", () => {
+		class Busy extends Schema.TaggedError<Busy>()("Busy", {
+			message: Schema.String,
+		}) {}
+		expect(
+			renderToStaticMarkup(
+				createElement(Outcome<number>, {
+					result: AsyncResult.failure<number, Busy>(
+						Cause.fail(new Busy({ message: "try again later" })),
+					),
+					children: String,
+				}),
+			),
+		).toBe(`<p role="alert">try again later</p>`);
+	});
+
 	test("shows a defect as something gone wrong, and no more, even beside an interruption", () => {
 		const defect = Cause.die(new Error("custom_cat failed: secret"));
 		expect(failed(defect)).toBe(
@@ -127,7 +146,7 @@ const rendered = (result: Result) =>
 		.onInterrupt(() => "")
 		// @ts-expect-error CliFailed has no handler.
 		.exhaustive();
-const submitted = (failure: FormFailure) =>
+const submitted = (failure: CopyFailure) =>
 	// @ts-expect-error CliFailed has no handler.
 	Match.valueTags(failure, {
 		InvalidRequest: () => "",

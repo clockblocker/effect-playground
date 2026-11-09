@@ -468,10 +468,10 @@ type tests, which `bun run check` runs.
   Each runs its procedure's mutation, which holds an `AsyncResult` of the success
   struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
   a C++ operation) or the client's `RpcClientError`:
-  `Atom.Failure<typeof customCat>`. `forms/shared.tsx` holds what they all
-  use: the resolver hook, a text field with its error under it,
-  `FormFailure`, any mutation's failure, `setIssues`
-  and `Outcome`. A submit runs the mutation and waits for its `Exit`, which
+  `Atom.Failure<typeof customCat>`. `forms/shared/` holds what they all
+  use: in `components/`, `TextField`, a text field with its error under it,
+  and `Outcome`; in `helpers.ts`, the resolver hook, `FormFailure`, any
+  mutation's failure, and `setIssues`. A submit runs the mutation and waits for its `Exit`, which
   keeps the button disabled meanwhile, and matches its error with
   `Match.valueTags`: an `InvalidRequest` goes to `setIssues`, which puts the
   first issue per field under it with

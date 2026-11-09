@@ -6,22 +6,20 @@ import type { Schema } from "effect";
 import { HttpApiMiddleware } from "effect/http-api";
 import { withStatus } from "./with-status.ts";
 
-/** The status each error answers with, by its tag. */
-const statuses = {
-	// The request's fields are wrong.
-	InvalidRequest: 422,
-	// The disk failed, the BFF's or an executable's: not the client's fault.
-	IoFailed: 500,
-	// A C++ operation is a service the BFF depends on, like a backend.
-	CliFailed: 503,
+const STATUS_CODE_FOR_TAG = {
+	InvalidRequest: 422, // The request's fields are wrong.
+	IoFailed: 500, // The disk failed, the BFF's or an executable's: not the client's fault.
+	CliFailed: 503, // A C++ operation is a service the BFF depends on, like a backend.
 } as const;
 
 /** An error class, whose tag has a status: a new tag doesn't compile until it has one. */
 type Tagged = Schema.Top & {
-	readonly Type: { readonly _tag: keyof typeof statuses };
+	readonly Type: { readonly _tag: keyof typeof STATUS_CODE_FOR_TAG };
 	readonly fields: {
 		readonly _tag: {
-			readonly schema: { readonly literal: keyof typeof statuses };
+			readonly schema: {
+				readonly literal: keyof typeof STATUS_CODE_FOR_TAG;
+			};
 		};
 	};
 };
@@ -34,12 +32,8 @@ type WithStatus<S extends Schema.Top> = Schema.Codec<
 >;
 
 const withItsStatus = <S extends Tagged>(error: S): WithStatus<S> =>
-	withStatus(statuses[error.fields._tag.schema.literal])(error);
+	withStatus(STATUS_CODE_FOR_TAG[error.fields._tag.schema.literal])(error);
 
-/**
- * An endpoint's errors: its operation's `Failure`, then any of the BFF's
- * own, such as CliFailed, each with its tag's status.
- */
 export const errorsOf = <
 	const Members extends ReadonlyArray<Tagged>,
 	const More extends ReadonlyArray<Tagged>,
@@ -51,12 +45,6 @@ export const errorsOf = <
 	...{ readonly [K in keyof More]: WithStatus<More[K]> },
 ] => [...failure.members, ...more].map(withItsStatus) as never;
 
-/**
- * The middleware that turns a body of the wrong shape, which no handler
- * sees, into its operation's InvalidRequest:
- * `class CustomCatSchemaErrors extends SchemaErrorsOf<CustomCatSchemaErrors>()("…/CustomCatSchemaErrors", CustomCat) {}`.
- * The body is decoded by its shape alone, so the operation checks the rules.
- */
 export const SchemaErrorsOf =
 	<Self>() =>
 	<const Id extends string, I extends Tagged>(

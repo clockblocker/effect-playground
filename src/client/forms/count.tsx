@@ -3,7 +3,9 @@ import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { CustomWc } from "../../shared/generated/generated.ts";
 import { customWc } from "../data-access/data-access.ts";
-import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
+import { Outcome } from "./shared/components/outcome.tsx";
+import { TextField } from "./shared/components/text-field.tsx";
+import { setIssues, useSchemaResolver } from "./shared/helpers.ts";
 
 export function CountForm({
 	schema,
