@@ -168,15 +168,15 @@ bun run dev
 ```
 
 Open <http://127.0.0.1:5200/>. `bun run dev` builds `cpp/` if needed, then
-runs the BFF as `bun --watch src/server/main.ts` next to Vite. The BFF
-listens on 5201 and Vite proxies `/rpc` to it; the REST API is at
-`http://127.0.0.1:5201/api/…` and the MCP server at
-`http://127.0.0.1:5201/mcp`, which Vite doesn't proxy.
-`EFFECT_PLAYGROUND_PORT` and `EFFECT_PLAYGROUND_SERVER_PORT` move those.
+runs the BFF as `bun --watch src/server/main.ts`. One Bun server serves it
+all on 5200: the page at `/`, which Bun bundles from `src/client/index.html`
+as it's requested and hot-reloads as `src/client` changes, the RPC at `/rpc`,
+the REST API at `http://127.0.0.1:5200/api/…` and the MCP server at
+`http://127.0.0.1:5200/mcp`. `EFFECT_PLAYGROUND_PORT` moves it.
+`bun run build` bundles the page into `dist/`.
 
-Stop `bun run dev` with Ctrl-C, which signals every process in it. `bun run`
-doesn't forward SIGTERM to its children: `kill <pid of bun run dev>` leaves
-the BFF and Vite running.
+Stop `bun run dev` with Ctrl-C. `bun run` doesn't forward SIGTERM to its
+child: `kill <pid of bun run dev>` leaves the BFF running.
 
 What each transport serves:
 
@@ -204,7 +204,7 @@ For example, after `initialize` (whose response carries `mcp-session-id`)
 and `notifications/initialized`:
 
 ```sh
-curl http://127.0.0.1:5201/mcp \
+curl http://127.0.0.1:5200/mcp \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -H "mcp-session-id: $session" -H 'mcp-protocol-version: 2025-11-25' \

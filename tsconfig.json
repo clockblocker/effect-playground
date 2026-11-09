@@ -13,14 +13,13 @@
 		"skipLibCheck": true,
 		"strict": true,
 		"target": "ESNext",
-		"types": ["bun-types", "vite/client"],
+		"types": ["bun-types"],
 		"verbatimModuleSyntax": true
 	},
 	"include": [
 		"src/**/*.ts",
 		"src/**/*.tsx",
 		"scripts/**/*.ts",
-		"test/**/*.ts",
-		"vite.config.ts"
+		"test/**/*.ts"
 	]
 }
