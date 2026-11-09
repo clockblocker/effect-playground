@@ -33,22 +33,22 @@ export class BffApi extends HttpApi.make("bff")
 	.add(
 		HttpApiGroup.make("files")
 			.add(
-				HttpApiEndpoint.get("read", "/files/read/:name", {
+				HttpApiEndpoint.get("ReadFile", "/files/read/:name", {
 					params: ReadFile.RequestShape.fields,
 					success: Schema.String.pipe(HttpApiSchema.asText()),
 					error: errorsOf(ReadFile.Failure),
 				}),
-				HttpApiEndpoint.post("search", "/files/search", {
+				HttpApiEndpoint.post("SearchFile", "/files/search", {
 					payload: SearchFile.RequestShape,
 					success: SearchFile.Success,
 					error: errorsOf(SearchFile.Failure),
 				}).middleware(SearchFileSchemaErrors),
-				HttpApiEndpoint.post("copy", "/files/copy", {
+				HttpApiEndpoint.post("CustomCat", "/files/copy", {
 					payload: CustomCat.RequestShape,
 					success: CustomCat.Success,
 					error: errorsOf(CustomCat.Failure, CliFailed),
 				}).middleware(CustomCatSchemaErrors),
-				HttpApiEndpoint.post("count", "/files/count", {
+				HttpApiEndpoint.post("CustomWc", "/files/count", {
 					payload: CustomWc.RequestShape,
 					success: CustomWc.Success,
 					error: errorsOf(CustomWc.Failure, CliFailed),

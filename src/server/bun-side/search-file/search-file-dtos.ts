@@ -1,5 +1,5 @@
 // What SearchFile takes, succeeds with and fails with. The BFF serves it
-// itself, in BffSearcher (search-file.ts). `bun run generate` writes them
+// itself, in SearchFileBff (search-file.ts). `bun run generate` writes them
 // again, and SearchFile's namespace, in
 // src/shared/generated/bun-side/search-file/.
 

@@ -12,8 +12,8 @@ import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Result } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
-import { BffReader } from "../src/server/bun-side/read-file/read-file.ts";
-import { BffSearcher } from "../src/server/bun-side/search-file/search-file.ts";
+import { ReadFileBff } from "../src/server/bun-side/read-file/read-file.ts";
+import { SearchFileBff } from "../src/server/bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RestRoutes } from "../src/server/protocols/rest.ts";
@@ -23,10 +23,10 @@ import { ReadFile, SearchFile } from "../src/shared/generated/generated.ts";
 const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";
 const notPlain = String.raw`Expected a string matching the RegExp ^(?!\.\.?$)[^/\\]*$`;
 
-const readIn = (layer: typeof BffReader.layer) => (name: string) =>
+const readIn = (layer: typeof ReadFileBff.layer) => (name: string) =>
 	Effect.runPromise(
 		Effect.gen(function* () {
-			return yield* (yield* BffReader).read(name);
+			return yield* (yield* ReadFileBff).run({ name });
 		}).pipe(
 			Effect.result,
 			Effect.provide(layer.pipe(Layer.provide(BunServices.layer))),
@@ -39,10 +39,10 @@ const issuesOf = (result: Result.Result<unknown, ReadFile.Failure>) =>
 	result.failure.issues;
 
 // Both read the repository's files/.
-const read = readIn(BffReader.layer);
+const read = readIn(ReadFileBff.layer);
 
 const scratch = mkdtempSync(join(tmpdir(), "bff-"));
-const readScratch = readIn(BffReader.layerIn(scratch));
+const readScratch = readIn(ReadFileBff.layerIn(scratch));
 
 const handlers: Array<() => Promise<void>> = [];
 
@@ -51,11 +51,11 @@ function rest(binary?: string) {
 	const { handler, dispose } = HttpRouter.toWebHandler(
 		RestRoutes.pipe(
 			Layer.provide([
-				BffSearcher.layer,
+				SearchFileBff.layer,
 				CustomCatCli.layerWith({ directory: scratch, binary }),
 				CustomWcCli.layerWith({ directory: scratch }),
 			]),
-			Layer.provideMerge(BffReader.layerIn(scratch)),
+			Layer.provideMerge(ReadFileBff.layerIn(scratch)),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
 		),
@@ -98,16 +98,16 @@ function rest(binary?: string) {
 
 const { get, search, copy, count } = rest();
 
-/** BffSearcher over the files in `scratch`. */
+/** SearchFileBff over the files in `scratch`. */
 const searchScratch = (request: SearchFile.RequestShape) =>
 	Effect.runPromise(
 		Effect.gen(function* () {
-			return yield* (yield* BffSearcher).search(request);
+			return yield* (yield* SearchFileBff).run(request);
 		}).pipe(
 			Effect.result,
 			Effect.provide(
-				BffSearcher.layer.pipe(
-					Layer.provide(BffReader.layerIn(scratch)),
+				SearchFileBff.layer.pipe(
+					Layer.provide(ReadFileBff.layerIn(scratch)),
 					Layer.provide(BunServices.layer),
 				),
 			),
@@ -138,7 +138,7 @@ afterAll(async () => {
 	rmSync(scratch, { recursive: true, force: true });
 });
 
-describe("BffReader", () => {
+describe("ReadFileBff", () => {
 	test("reads a .txt file", async () => {
 		const result = await read("hello.txt");
 		expect(Result.isSuccess(result) && result.success.contents).toStartWith(
@@ -166,7 +166,7 @@ describe("BffReader", () => {
 	});
 });
 
-describe("BffReader in a files/ of its own", () => {
+describe("ReadFileBff in a files/ of its own", () => {
 	test("fails with IoFailed for a directory named x.txt", async () => {
 		const result = await readScratch("dir.txt");
 		expect(result).toEqual(
@@ -205,7 +205,7 @@ describe("BffReader in a files/ of its own", () => {
 	});
 });
 
-describe("BffSearcher", () => {
+describe("SearchFileBff", () => {
 	test("finds every line with the query, numbered from 1", async () => {
 		expect(await searchScratch({ name: "poem.txt", query: "the" })).toEqual(
 			Result.succeed({
@@ -239,7 +239,7 @@ describe("BffSearcher", () => {
 		);
 	});
 
-	test("reports what BffReader says of the file, as its own", async () => {
+	test("reports what ReadFileBff says of the file, as its own", async () => {
 		const missing = await searchScratch({
 			name: "missing.txt",
 			query: "a",

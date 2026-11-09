@@ -41,9 +41,9 @@ Who checks the rules depends on the operation:
   DTOs are written in TypeScript, beside the BFF service that serves it, in
   `src/server/bun-side/read-file/read-file-dtos.ts` and
   `src/server/bun-side/search-file/search-file-dtos.ts`, with the same name
-  rules as a copy's input. `BffReader` checks a read's name with the
-  generated schema, then the files; `BffSearcher` checks a search's name and
-  query, then reads with `BffReader`.
+  rules as a copy's input. `ReadFileBff` checks a read's name with the
+  generated schema, then the files; `SearchFileBff` checks a search's name and
+  query, then reads with `ReadFileBff`.
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
 RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
@@ -115,7 +115,7 @@ defect with the schema's message, with no hook to turn it into a typed
 error. So each method's payload schema is its `RequestShape`, the request's
 fields with their types and no rules: a payload that breaks a rule decodes,
 and the handler answers it with the method's `InvalidRequest`, the
-executable's for a copy or a count, and `BffReader`'s or `BffSearcher`'s for
+executable's for a copy or a count, and `ReadFileBff`'s or `SearchFileBff`'s for
 a read or a search. Only a payload of the wrong shape
 dies, which the page's client never sends, since it encodes the payload
 with the same schema. The REST body and the MCP tool's parameters are
@@ -169,10 +169,12 @@ What each transport serves:
 - REST, for other clients: `GET /api/files/read/:name`, and
   `POST /api/files/search`, `POST /api/files/copy` and
   `POST /api/files/count`, whose JSON bodies are each operation's
-  `RequestShape`. A client HttpApi derives from `BffApi` calls them as
-  `client.files.read({ params: { name } })`,
-  `client.files.search({ payload })`, `client.files.copy({ payload })` and
-  `client.files.count({ payload })`. An `InvalidRequest` is a 422 whose body
+  `RequestShape`. Each endpoint is named after its operation, so a client
+  HttpApi derives from `BffApi` calls them as
+  `client.files.ReadFile({ params: { name } })`,
+  `client.files.SearchFile({ payload })`,
+  `client.files.CustomCat({ payload })` and
+  `client.files.CustomWc({ payload })`. An `InvalidRequest` is a 422 whose body
   is its JSON, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"Expected a string matching the RegExp ^.+\\.txt$","path":["name"]}]}`.
 - MCP, for MCP clients: the `custom_cat` and `custom_wc` tools, over
@@ -387,9 +389,9 @@ Nothing is shared between operations: each declares every struct and error
 it uses, so `CustomCat.IoFailed` and `CustomWc.IoFailed` are two classes
 with one tag.
 
-`BffReader` decodes a read's name with `ReadFile.Request.fields.name`, and a
+`ReadFileBff` decodes a read's name with `ReadFile.Request.fields.name`, and a
 name it rejects is an issue with the decode's message, such as
-`Expected a string with at least 5 code points`. `BffSearcher` decodes each
+`Expected a string with at least 5 code points`. `SearchFileBff` decodes each
 of a search's fields so, with an issue for each that fails, such as
 `Expected a value with a length of at least 1` on `["query"]`. Then it refuses a link, a
 literal, `"out.txt" is a link, which could lead outside the files directory`,
@@ -447,8 +449,8 @@ type tests, which `bun run check` runs.
   `fieldOf`, `withStatus`, `rest-errors.ts`, how REST answers an error, and
   `procedure.ts`, what every namespace builds alike.
 - `src/server/` is the BFF: `bun-side/` holds a directory per operation it
-  serves itself, its DTOs and its service, `read-file/` with `BffReader` and
-  `search-file/` with `BffSearcher`, `cpp-side/` the
+  serves itself, its DTOs and its service, `read-file/` with `ReadFileBff` and
+  `search-file/` with `SearchFileBff`, `cpp-side/` the
   CLI runner and a service per C++ operation, `CustomCatCli` and
   `CustomWcCli`, and `protocols/` the three transports, which `main.ts`
   mounts on one router.

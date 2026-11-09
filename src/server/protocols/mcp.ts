@@ -53,11 +53,11 @@ const Tools = Toolkit.make(CustomCatTool, CustomWcTool);
 
 const ToolHandlers = Tools.toLayer(
 	Effect.gen(function* () {
-		const cat = yield* CustomCatCli;
-		const wc = yield* CustomWcCli;
+		const customCat = yield* CustomCatCli;
+		const customWc = yield* CustomWcCli;
 		return Tools.of({
 			custom_cat: (request) =>
-				cat
+				customCat
 					.run(request)
 					.pipe(
 						Effect.catchTag("InvalidRequest", ({ issues }) =>
@@ -67,7 +67,7 @@ const ToolHandlers = Tools.toLayer(
 						),
 					),
 			custom_wc: (request) =>
-				wc
+				customWc
 					.run(request)
 					.pipe(
 						Effect.catchTag("InvalidRequest", ({ issues }) =>

@@ -15,8 +15,8 @@ import {
 	CustomWcSchemaErrors,
 	SearchFileSchemaErrors,
 } from "../../shared/rest-api.ts";
-import { BffReader } from "../bun-side/read-file/read-file.ts";
-import { BffSearcher } from "../bun-side/search-file/search-file.ts";
+import { ReadFileBff } from "../bun-side/read-file/read-file.ts";
+import { SearchFileBff } from "../bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
@@ -67,19 +67,19 @@ const FilesHandlers = HttpApiBuilder.group(
 	BffApi,
 	"files",
 	Effect.fn(function* (handlers) {
-		const reader = yield* BffReader;
-		const searcher = yield* BffSearcher;
-		const cat = yield* CustomCatCli;
-		const wc = yield* CustomWcCli;
-		return handlers
-			.handle("read", ({ params }) =>
-				reader
-					.read(params.name)
+		const readFile = yield* ReadFileBff;
+		const searchFile = yield* SearchFileBff;
+		const customCat = yield* CustomCatCli;
+		const customWc = yield* CustomWcCli;
+		return handlers.handleAll({
+			ReadFile: ({ params }) =>
+				readFile
+					.run(params)
 					.pipe(Effect.map(({ contents }) => contents)),
-			)
-			.handle("search", ({ payload }) => searcher.search(payload))
-			.handle("copy", ({ payload }) => cat.run(payload))
-			.handle("count", ({ payload }) => wc.run(payload));
+			SearchFile: ({ payload }) => searchFile.run(payload),
+			CustomCat: ({ payload }) => customCat.run(payload),
+			CustomWc: ({ payload }) => customWc.run(payload),
+		});
 	}),
 );
 

@@ -29,18 +29,18 @@ const systemMessage = (
 		: error.message;
 };
 
-export class BffReader extends Context.Service<
-	BffReader,
+export class ReadFileBff extends Context.Service<
+	ReadFileBff,
 	{
-		readonly read: (
-			name: string,
+		readonly run: (
+			request: ReadFile.RequestShape,
 		) => Effect.Effect<ReadFile.Success, ReadFile.Failure>;
 	}
->()("effect-playground/BffReader") {
+>()("effect-playground/ReadFileBff") {
 	/** Reads the files in `root`'s files/. */
 	static layerIn(root: string) {
 		return Layer.effect(
-			BffReader,
+			ReadFileBff,
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem;
 				const path = yield* Path.Path;
@@ -62,9 +62,9 @@ export class BffReader extends Context.Service<
 					return path.dirname(resolved.value) !== inside;
 				});
 
-				const read = Effect.fn("BffReader.read")(function* (
-					name: string,
-				) {
+				const run = Effect.fn("ReadFileBff.run")(function* ({
+					name,
+				}: ReadFile.RequestShape) {
 					yield* checkName(name).pipe(
 						Effect.mapError(({ message }) => invalidName(message)),
 					);
@@ -91,12 +91,12 @@ export class BffReader extends Context.Service<
 					return { contents };
 				});
 
-				return BffReader.of({ read });
+				return ReadFileBff.of({ run });
 			}),
 		);
 	}
 
-	static readonly layer = BffReader.layerIn(
+	static readonly layer = ReadFileBff.layerIn(
 		join(import.meta.dirname, "../../../.."),
 	);
 }

@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { SearchFile } from "../../../shared/generated/generated.ts";
-import { BffReader } from "../read-file/read-file.ts";
+import { ReadFileBff } from "../read-file/read-file.ts";
 
 /** Each field's issue, if its rules reject it, with the decode's message. */
 const issuesOf = Effect.fn(function* (request: SearchFile.RequestShape) {
@@ -24,20 +24,20 @@ const matching = (text: string, query: string) =>
 			line.includes(query) ? [{ line: index + 1, text: line }] : [],
 		);
 
-export class BffSearcher extends Context.Service<
-	BffSearcher,
+export class SearchFileBff extends Context.Service<
+	SearchFileBff,
 	{
-		readonly search: (
+		readonly run: (
 			request: SearchFile.RequestShape,
 		) => Effect.Effect<SearchFile.Success, SearchFile.Failure>;
 	}
->()("effect-playground/BffSearcher") {
-	/** Searches with `BffReader`, which checks the name against the files. */
+>()("effect-playground/SearchFileBff") {
+	/** Searches with `ReadFileBff`, which checks the name against the files. */
 	static readonly layer = Layer.effect(
-		BffSearcher,
+		SearchFileBff,
 		Effect.gen(function* () {
-			const reader = yield* BffReader;
-			const search = Effect.fn("BffSearcher.search")(function* (
+			const readFile = yield* ReadFileBff;
+			const run = Effect.fn("SearchFileBff.run")(function* (
 				request: SearchFile.RequestShape,
 			) {
 				const [first, ...rest] = yield* issuesOf(request);
@@ -46,19 +46,23 @@ export class BffSearcher extends Context.Service<
 						issues: [first, ...rest],
 					});
 				}
-				const { contents } = yield* reader.read(request.name).pipe(
-					Effect.catchTags({
-						InvalidRequest: ({ issues }) =>
-							Effect.fail(
-								new SearchFile.InvalidRequest({ issues }),
-							),
-						IoFailed: ({ message }) =>
-							Effect.fail(new SearchFile.IoFailed({ message })),
-					}),
-				);
+				const { contents } = yield* readFile
+					.run({ name: request.name })
+					.pipe(
+						Effect.catchTags({
+							InvalidRequest: ({ issues }) =>
+								Effect.fail(
+									new SearchFile.InvalidRequest({ issues }),
+								),
+							IoFailed: ({ message }) =>
+								Effect.fail(
+									new SearchFile.IoFailed({ message }),
+								),
+						}),
+					);
 				return { matches: matching(contents, request.query) };
 			});
-			return BffSearcher.of({ search });
+			return SearchFileBff.of({ run });
 		}),
 	);
 }

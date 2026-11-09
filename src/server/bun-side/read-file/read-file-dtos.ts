@@ -1,5 +1,5 @@
 // What ReadFile takes, succeeds with and fails with. The BFF serves it
-// itself, in BffReader (read-file.ts). `bun run generate` writes them again,
+// itself, in ReadFileBff (read-file.ts). `bun run generate` writes them again,
 // and ReadFile's namespace, in src/shared/generated/bun-side/read-file/.
 
 import { Schema } from "effect";

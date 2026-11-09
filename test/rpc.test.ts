@@ -6,8 +6,8 @@ import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp, customCatBinary, customWcBinary } from "../scripts/cpp.ts";
-import { BffReader } from "../src/server/bun-side/read-file/read-file.ts";
-import { BffSearcher } from "../src/server/bun-side/search-file/search-file.ts";
+import { ReadFileBff } from "../src/server/bun-side/read-file/read-file.ts";
+import { SearchFileBff } from "../src/server/bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RpcRoutes } from "../src/server/protocols/rpc.ts";
@@ -21,7 +21,7 @@ const server = (binary: string) =>
 	HttpRouter.toWebHandler(
 		RpcRoutes.pipe(
 			Layer.provide([
-				BffSearcher.layer,
+				SearchFileBff.layer,
 				CustomCatCli.layerWith({
 					directory,
 					binary,
@@ -29,7 +29,7 @@ const server = (binary: string) =>
 				}),
 				CustomWcCli.layerWith({ directory, binary: customWcBinary }),
 			]),
-			Layer.provideMerge(BffReader.layerIn(directory)),
+			Layer.provideMerge(ReadFileBff.layerIn(directory)),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
 		),
