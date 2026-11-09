@@ -2,6 +2,6 @@
 	"entry": ["src/server/main.ts", "scripts/*.ts", "test/**/*.test.ts"],
 	"ignoreDependencies": ["@effect/platform-node-shared"],
 	"ignoreIssues": {
-		"src/shared/generated/protocol/**": ["namespaceMembers"]
+		"src/shared/generated/**": ["namespaceMembers"]
 	}
 }

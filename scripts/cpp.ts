@@ -8,6 +8,9 @@ const build = join(source, "build");
 /** Copies one .txt file in `files/` to another; see `cpp/src/custom_cat.cpp`. */
 export const customCatBinary = join(build, "custom_cat");
 
+/** Counts a .txt file's lines, words and bytes; see `cpp/src/custom_wc.cpp`. */
+export const customWcBinary = join(build, "custom_wc");
+
 /** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
 export const protocolSchemaBinary = join(build, "protocol_schema");
 

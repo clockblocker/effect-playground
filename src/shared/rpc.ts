@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { CustomCat, ReadFile } from "./generated/generated.ts";
+import { CustomCat, CustomWc, ReadFile } from "./generated/generated.ts";
 import { CliFailed } from "./helpers/cli-failed.ts";
 
 // Every call is a POST to /rpc carrying { tag, payload }, such as
@@ -16,5 +16,10 @@ export class BffRpcs extends RpcGroup.make(
 		payload: CustomCat.RequestShape,
 		success: CustomCat.Success,
 		error: Schema.Union([CustomCat.Failure, CliFailed]),
+	}),
+	Rpc.make("CustomWc", {
+		payload: CustomWc.RequestShape,
+		success: CustomWc.Success,
+		error: Schema.Union([CustomWc.Failure, CliFailed]),
 	}),
 ) {}

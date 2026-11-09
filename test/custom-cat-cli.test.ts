@@ -14,11 +14,9 @@ import {
 	Result,
 } from "effect";
 import { buildCpp } from "../scripts/cpp.ts";
-import {
-	ContractMismatch,
-	CustomCatCli,
-} from "../src/server/cpp-side/custom-cat.ts";
-import { CustomCat, IoFailed } from "../src/shared/generated/generated.ts";
+import { ContractMismatch } from "../src/server/cpp-side/cli.ts";
+import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { CustomCat } from "../src/shared/generated/generated.ts";
 import { CliFailed } from "../src/shared/helpers/cli-failed.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "custom-cat-cli-"));
@@ -131,7 +129,7 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 			outputFile: "copy.txt",
 		});
 		expect(result).toEqual(
-			Result.fail(new IoFailed({ message: "Is a directory" })),
+			Result.fail(new CustomCat.IoFailed({ message: "Is a directory" })),
 		);
 		expect(Result.isFailure(result) && result.failure.message).toBe(
 			"Is a directory",
@@ -290,13 +288,11 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 			expect(defect.exitCode).toBe(0);
 		});
 
-		test("rejects its arguments", async () => {
+		test("exits 2, which no operation's executable has anymore", async () => {
 			const defect = mismatchOf(
 				(await runScript("usage", "echo 'bad flag' >&2\nexit 2")).exit,
 			);
-			expect(defect.issue).toBe(
-				"custom_cat rejected its arguments: bad flag",
-			);
+			expect(defect.issue).toBe("2 isn't one of custom_cat's exit codes");
 		});
 
 		test("exits with a code it doesn't have", async () => {

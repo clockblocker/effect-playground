@@ -14,8 +14,9 @@ import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
 import { BffReader } from "../src/server/bun-side/bff-reader.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RestRoutes } from "../src/server/protocols/rest.ts";
-import { IoFailed, ReadFile } from "../src/shared/generated/generated.ts";
+import { ReadFile } from "../src/shared/generated/generated.ts";
 
 // Effect's own messages, for the rules ReadFile.Request checks.
 const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";
@@ -51,6 +52,7 @@ function rest(binary?: string) {
 			Layer.provide([
 				BffReader.layerIn(scratch),
 				CustomCatCli.layerWith({ directory: scratch, binary }),
+				CustomWcCli.layerWith({ directory: scratch }),
 			]),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
@@ -73,10 +75,18 @@ function rest(binary?: string) {
 					body: JSON.stringify(payload),
 				}),
 			),
+		count: (payload: object) =>
+			answer(
+				new Request("http://127.0.0.1/api/files/count", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(payload),
+				}),
+			),
 	};
 }
 
-const { get, copy } = rest();
+const { get, copy, count } = rest();
 
 /** An executable shell script standing in for custom_cat. */
 async function script(name: string, body: string) {
@@ -131,7 +141,9 @@ describe("BffReader in a files/ of its own", () => {
 		const result = await readScratch("dir.txt");
 		expect(result).toEqual(
 			Result.fail(
-				new IoFailed({ message: "illegal operation on a directory" }),
+				new ReadFile.IoFailed({
+					message: "illegal operation on a directory",
+				}),
 			),
 		);
 	});
@@ -177,6 +189,33 @@ describe("REST", () => {
 		});
 		expect(status).toBe(200);
 		expect(JSON.parse(body)).toEqual({ bytesCopied: 6 });
+	});
+
+	test("answers a count with its success", async () => {
+		const { status, body } = await count({ file: "hello.txt" });
+		expect(status).toBe(200);
+		expect(JSON.parse(body)).toEqual({ lines: 1, words: 1, bytes: 6 });
+	});
+
+	test("answers custom_wc's InvalidRequest with 422, and a body of the wrong shape too", async () => {
+		const missing = await count({ file: "missing.txt" });
+		expect(missing.status).toBe(422);
+		expect(JSON.parse(missing.body)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [{ message: "No such file or directory", path: ["file"] }],
+		});
+		const wrongType = await count({ file: 42 });
+		expect(wrongType.status).toBe(422);
+		expect(JSON.parse(wrongType.body)._tag).toBe("InvalidRequest");
+	});
+
+	test("answers custom_wc's IoFailed with 500", async () => {
+		const { status, body } = await count({ file: "dir.txt" });
+		expect(status).toBe(500);
+		expect(JSON.parse(body)).toEqual({
+			_tag: "IoFailed",
+			message: "Is a directory",
+		});
 	});
 
 	test("answers an InvalidRequest with 422 and its issues", async () => {

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
-import { CustomCat, IoFailed } from "../src/shared/generated/generated.ts";
+import { CustomCat } from "../src/shared/generated/generated.ts";
 
 // What the BFF decodes custom_cat's stdout with.
 const output = Schema.decodeUnknownSync(
@@ -264,7 +264,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 			stderr: "",
 			exitCode: 3,
 		});
-		expect(output(again.stdout)).toBeInstanceOf(IoFailed);
+		expect(output(again.stdout)).toBeInstanceOf(CustomCat.IoFailed);
 	});
 
 	test("refuses to copy a file onto itself", async () => {
@@ -366,7 +366,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(failed.exitCode).toBe(3);
 		expect(output(failed.stdout)).toEqual(
-			new IoFailed({ message: "Permission denied" }),
+			new CustomCat.IoFailed({ message: "Permission denied" }),
 		);
 		expect(await file("copy.txt").text()).toBe("Old\n");
 	});
@@ -380,7 +380,7 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 		expect(failed.exitCode).toBe(3);
 		expect(output(failed.stdout)).toEqual(
-			new IoFailed({ message: "Is a directory" }),
+			new CustomCat.IoFailed({ message: "Is a directory" }),
 		);
 		expect(readdirSync(join(directory, "files")).sort()).toEqual([
 			"hello.txt",

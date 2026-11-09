@@ -1,43 +1,77 @@
 import { Effect, Layer, Schema } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
-import { CustomCat } from "../../shared/generated/generated.ts";
+import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
 import { CliFailed } from "../../shared/helpers/cli-failed.ts";
 import { fieldOf } from "../../shared/helpers/field-of.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
+import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
 // McpServer makes a failure's message the tool error's text, and an MCP
 // client has no form to put each issue under, so its text names each field.
 // Any other failure's message reads as it is.
-class ToolInvalidRequest extends CustomCat.InvalidRequest {
+const fieldMessages = (
+	issues: ReadonlyArray<{
+		readonly path: ReadonlyArray<string | number>;
+		readonly message: string;
+	}>,
+) =>
+	issues
+		.map(({ path, message }) => `${fieldOf(path)}: ${message}`)
+		.join("\n");
+
+class CustomCatInvalidRequest extends CustomCat.InvalidRequest {
 	override get message(): string {
-		return this.issues
-			.map(({ path, message }) => `${fieldOf(path)}: ${message}`)
-			.join("\n");
+		return fieldMessages(this.issues);
 	}
 }
 
+class CustomWcInvalidRequest extends CustomWc.InvalidRequest {
+	override get message(): string {
+		return fieldMessages(this.issues);
+	}
+}
+
+// By shape alone: the C++ checks the rules.
 const CustomCatTool = Tool.make("custom_cat", {
 	description:
 		"Copies a .txt file in the files directory to another .txt file there, " +
 		"replacing it if it exists.",
-	// By shape alone: custom_cat checks the rules.
 	parameters: CustomCat.RequestShape,
 	success: CustomCat.Success,
 	failure: Schema.Union([CustomCat.Failure, CliFailed]),
 });
 
-const Tools = Toolkit.make(CustomCatTool);
+const CustomWcTool = Tool.make("custom_wc", {
+	description:
+		"Counts the lines, words and bytes of a .txt file in the files directory.",
+	parameters: CustomWc.RequestShape,
+	success: CustomWc.Success,
+	failure: Schema.Union([CustomWc.Failure, CliFailed]),
+});
+
+const Tools = Toolkit.make(CustomCatTool, CustomWcTool);
 
 const ToolHandlers = Tools.toLayer(
 	Effect.gen(function* () {
-		const cli = yield* CustomCatCli;
+		const cat = yield* CustomCatCli;
+		const wc = yield* CustomWcCli;
 		return Tools.of({
 			custom_cat: (request) =>
-				cli
+				cat
 					.run(request)
 					.pipe(
 						Effect.catchTag("InvalidRequest", ({ issues }) =>
-							Effect.fail(new ToolInvalidRequest({ issues })),
+							Effect.fail(
+								new CustomCatInvalidRequest({ issues }),
+							),
+						),
+					),
+			custom_wc: (request) =>
+				wc
+					.run(request)
+					.pipe(
+						Effect.catchTag("InvalidRequest", ({ issues }) =>
+							Effect.fail(new CustomWcInvalidRequest({ issues })),
 						),
 					),
 		});

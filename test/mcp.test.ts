@@ -7,6 +7,7 @@ import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { McpRoutes } from "../src/server/protocols/mcp.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "mcp-"));
@@ -17,7 +18,10 @@ const disposers: Array<() => Promise<void>> = [];
 function mcp(binary?: string) {
 	const { handler, dispose } = HttpRouter.toWebHandler(
 		McpRoutes.pipe(
-			Layer.provide(CustomCatCli.layerWith({ directory, binary })),
+			Layer.provide([
+				CustomCatCli.layerWith({ directory, binary }),
+				CustomWcCli.layerWith({ directory }),
+			]),
 			Layer.provide(BunServices.layer),
 		),
 		{ disableLogger: true },
@@ -112,7 +116,7 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 		expect(initialized.session ?? "").not.toBe("");
 	});
 
-	test("lists custom_cat with the request's fields, by shape alone", async () => {
+	test("lists custom_cat and custom_wc with the request's fields, by shape alone", async () => {
 		const { body } = await post("tools/list");
 		expect(body.result.tools).toEqual([
 			expect.objectContaining({
@@ -126,7 +130,41 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 					required: ["inputFile", "outputFile"],
 				}),
 			}),
+			expect.objectContaining({
+				name: "custom_wc",
+				inputSchema: expect.objectContaining({
+					properties: { file: { type: "string" } },
+					required: ["file"],
+				}),
+			}),
 		]);
+	});
+
+	test("counts with custom_wc, and answers with the success", async () => {
+		const { body } = await post("tools/call", {
+			name: "custom_wc",
+			arguments: { file: "hello.txt" },
+		});
+		expect(body.result).toEqual({
+			content: [
+				{ type: "text", text: '{"lines":1,"words":1,"bytes":6}' },
+			],
+			structuredContent: { lines: 1, words: 1, bytes: 6 },
+			isError: false,
+		});
+	});
+
+	test("answers custom_wc's InvalidRequest with a tool error naming the field", async () => {
+		const { body } = await post("tools/call", {
+			name: "custom_wc",
+			arguments: { file: "missing.txt" },
+		});
+		expect(body.result).toMatchObject({
+			content: [
+				{ type: "text", text: "file: No such file or directory" },
+			],
+			isError: true,
+		});
 	});
 
 	test("copies, and answers with the success", async () => {

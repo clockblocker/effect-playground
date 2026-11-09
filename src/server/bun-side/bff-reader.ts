@@ -10,7 +10,7 @@ import {
 	type PlatformError,
 	Schema,
 } from "effect";
-import { IoFailed, ReadFile } from "../../shared/generated/generated.ts";
+import { ReadFile } from "../../shared/generated/generated.ts";
 
 const invalidName = (message: string) =>
 	new ReadFile.InvalidRequest({ issues: [{ message, path: ["name"] }] });
@@ -82,7 +82,7 @@ export class BffReader extends Context.Service<
 								Effect.fail(invalidName(systemMessage(error))),
 							(_, error) =>
 								Effect.fail(
-									new IoFailed({
+									new ReadFile.IoFailed({
 										message: systemMessage(error),
 									}),
 								),

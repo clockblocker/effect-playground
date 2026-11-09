@@ -24,9 +24,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(reflectcpp)
 
 add_executable(custom_cat src/custom_cat.cpp)
+add_executable(custom_wc src/custom_wc.cpp)
 add_executable(protocol_schema src/protocol_schema.cpp)
 
-foreach(target custom_cat protocol_schema)
+foreach(target custom_cat custom_wc protocol_schema)
 	target_include_directories(${target} PRIVATE include)
 	target_link_libraries(${target} PRIVATE reflectcpp)
 	target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)

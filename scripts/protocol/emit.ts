@@ -4,12 +4,18 @@ import type { Definition, Procedure, Protocol } from "./normalize.ts";
 
 /** Where the generated files come from and go, from the repository's root. */
 export interface Origin {
-	/** The source, such as `cpp/include/protocol.hpp`. */
-	readonly from: string;
+	/** The header that lists the C++ operations, `cpp/include/protocol.hpp`. */
+	readonly cpp: string;
+	/** The directory of each C++ operation's own header, `cpp/include/protocol`. */
+	readonly cppHeaders: string;
+	/** The directory of the bun-side operations' DTOs, `src/shared/bun-side`. */
+	readonly bunSide: string;
 	/** The generator, such as `scripts/generate.ts`. */
 	readonly by: string;
 	/** The directory the files go in, such as `src/shared/generated`. */
 	readonly into: string;
+	/** The module of what every namespace shares, `src/shared/helpers/procedure.ts`. */
+	readonly helpers: string;
 }
 
 /** A generated file, its path relative to `Origin.into`. */
@@ -19,168 +25,207 @@ export interface File {
 }
 
 /**
- * Writes the Effect Schema modules for a normalized protocol, in a directory
- * named after the C++ namespace, such as `protocol/`, and `generated.ts`, an
- * index that re-exports what they declare.
+ * An operation the BFF serves itself, whose DTOs are written by hand: a
+ * module that exports `Request`, `Success`, the other structs they use, the
+ * errors besides InvalidRequest, and `Errors`, a list of those.
+ */
+export interface BunOperation {
+	readonly name: string;
+	/** The DTOs' module, from the repository's root. */
+	readonly dtos: string;
+	/** `Request`, from Effect's JSON Schema of it. */
+	readonly request: Definition;
+	/** Whether `Success` is `Request`. */
+	readonly sameStruct: boolean;
+	/** The module's other structs, by the names it exports them under. */
+	readonly structs: readonly string[];
+	/** The module's errors, by the names it exports them under. */
+	readonly errors: readonly string[];
+}
+
+/** What a namespace is built from, whichever side declared it. */
+interface Operation {
+	readonly name: string;
+	/** Its directory, such as `cpp-side/custom-cat`. */
+	readonly directory: string;
+	/** What it's generated from, from the repository's root. */
+	readonly from: string;
+	/** Its DTOs' module, from the repository's root. */
+	readonly dtos: string;
+	/** The definition of its request, `payload`, among `definitions`. */
+	readonly payload: string;
+	readonly definitions: ReadonlyMap<string, Definition>;
+	/** The DTOs' structs, under their names there: `Request` first. */
+	readonly structs: readonly string[];
+	readonly sameStruct: boolean;
+	readonly errors: readonly string[];
+	/** Its success's tag in what it prints, if it prints one. */
+	readonly successTag: string | undefined;
+}
+
+/**
+ * Writes a directory per operation under the side that serves it, such as
+ * `cpp-side/custom-cat/`, and `generated.ts`, an index of the namespaces.
  *
- * Each procedure gets a TypeScript namespace of its own name, in a file of
- * its own under its side, such as `protocol/cpp-side/custom-cat.ts`. In it,
- * its payload is `Request`, `RequestShape` the same without its checks, and
- * its success `Success`; `Path` lists where in a request an issue can be,
- * `Issue` is a problem there, and `InvalidRequest` holds them. `Failure` is
- * `InvalidRequest` or one of its other errors, such as `IoFailed`, and
- * `Output` what it prints, the success tagged or a failure. Every other
- * definition only it uses keeps its own name. The errors besides
- * InvalidRequest are declared once, in `protocol/common/tagged-errors.ts`,
- * and a definition more than one procedure uses in
- * `protocol/common/definitions.ts`.
+ * In an operation's directory, `custom-cat-namespace.ts` is what consumers
+ * use, a namespace named after it: each of its DTOs with its type, then what
+ * the generator derives from them, `RequestShape`, the request without its
+ * checks, and `Path`, where in a request an issue can be, then what every
+ * operation builds alike from those, with `Origin.helpers`: `Issue`,
+ * `InvalidRequest`, `Failure` and, for a C++ operation, `Output`, what it
+ * prints. A C++ operation's DTOs are generated beside it, in
+ * `custom-cat-dtos.ts`: what it takes, succeeds with and fails with, as C++
+ * declares them, `Request`, `Success`, the structs they use under their own
+ * names, the errors besides InvalidRequest, and `Errors`, a list of those. A
+ * bun-side operation's are written by hand, in `Origin.bunSide`. Nothing is
+ * shared between operations: each declares every struct and error it uses.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
  * declarations around them, which that engine cannot express: `TaggedError`
  * classes and struct and type pairs.
  */
-export function emit(protocol: Protocol, origin: Origin): readonly File[] {
-	const { namespace, procedures, definitions, errors } = protocol;
-	for (const { name } of errors) {
-		if ((roleNames as readonly string[]).includes(name)) {
-			throw new Error(
-				`${name} would clash with the generated ${name}; rename the struct`,
-			);
-		}
-	}
-
-	const uses = procedures.map((procedure) => ({
-		procedure,
-		names: dependencyOrder(
-			[procedure.payload, procedure.success],
-			definitions,
-		),
-	}));
-	const users = new Map<string, string[]>();
-	for (const { procedure, names } of uses) {
-		for (const name of names) {
-			users.set(name, [...(users.get(name) ?? []), procedure.name]);
-		}
-	}
-	const shared = new Set(
-		[...users].filter(([, by]) => by.length > 1).map(([name]) => name),
-	);
-	for (const name of shared) {
-		const by = users.get(name)?.join(" and ");
-		const owner = procedures.find(
-			({ payload, success }) => payload === name || success === name,
-		);
-		if (owner !== undefined) {
-			throw new Error(
-				`${name} is used by ${by}, but ${owner.name} declares it as ` +
-					`${owner.payload === name ? "Request" : "Success"}; the ` +
-					"generator can only share other definitions",
-			);
-		}
-	}
-	// Each procedure's names are in dependency order, so their first
-	// occurrences are too.
-	const sharedNames = [...new Set(uses.flatMap(({ names }) => names))].filter(
-		(name) => shared.has(name),
-	);
-
-	const directory = kebabCase(pascalCase(namespace || "protocol"));
-	const definitionsFile = `${directory}/common/definitions.ts`;
-	const errorsFile = `${directory}/common/tagged-errors.ts`;
-	const comment = [
+export function emit(
+	protocol: Protocol,
+	bunSide: readonly BunOperation[],
+	origin: Origin,
+): readonly File[] {
+	const { definitions, errors } = protocol;
+	const header = (from: string) => [
 		"/*",
 		"Generated",
-		`- from: ${origin.from}`,
+		`- from: ${from}`,
 		`- by: ${origin.by}`,
 		"*/",
+		"",
 	];
-	/** A Markdown link to `target`, from the file at `path`. */
-	const link = (path: string, target: string) =>
-		`[${target}](${relative(dirname(join(origin.into, path)), target)})`;
-	/** The file at `path`, which imports `names` from where they're declared. */
+	/** The file at `path`, generated from `from`: its imports, then its body. */
 	const module = (
 		path: string,
-		imports: ReadonlyArray<
-			readonly [file: string, names: readonly string[]]
-		>,
+		from: string,
+		imports: readonly string[],
 		body: readonly string[],
 	): File => ({
 		path,
-		source: [
-			...comment,
-			"",
-			'import { Schema } from "effect";',
-			...imports
-				.filter(([, names]) => names.length > 0)
-				.map(
-					([file, names]) =>
-						`import { ${names.join(", ")} } from "${relativeImport(path, file)}";`,
-				),
-			"",
-			...body,
-		].join("\n"),
+		source: [...header(from), ...imports, "", ...body].join("\n"),
 	});
-	const sharedIn = (names: readonly string[]) =>
-		sharedNames.filter((name) => names.includes(name));
 
 	const files: File[] = [];
-	const exports: Array<readonly [file: string, names: readonly string[]]> =
-		[];
-	if (sharedNames.length > 0) {
+	const operations: Operation[] = [];
+	for (const procedure of protocol.procedures) {
+		const procedureErrors = procedure.errors.map((name) =>
+			required(new Map(errors.map((error) => [error.name, error])), name),
+		);
+		for (const { name } of procedureErrors) {
+			if ((roleNames as readonly string[]).includes(name)) {
+				throw new Error(
+					`${name} would clash with the generated ${name}; rename the struct`,
+				);
+			}
+		}
+		const names = dependencyOrder(
+			[
+				procedure.payload,
+				procedure.success,
+				...procedureErrors.flatMap((error) => refsOf(error)),
+			],
+			definitions,
+		);
+		checkNames(procedure, names, definitions);
+		const directory = `cpp-side/${kebabCase(procedure.name)}`;
+		const dtos = `${directory}/${kebabCase(procedure.name)}-dtos.ts`;
+		const from = `${origin.cppHeaders}/${snakeCase(procedure.name)}.hpp`;
 		files.push(
 			module(
-				definitionsFile,
-				[],
-				sharedNames.map((name) =>
-					declare(required(definitions, name), definitions),
-				),
+				dtos,
+				from,
+				['import { Schema } from "effect";'],
+				[
+					...names.map((name) =>
+						declare(
+							required(definitions, name),
+							definitions,
+							roleOf(procedure, name),
+						),
+					),
+					...(procedure.success === procedure.payload
+						? ["export const Success = Request;", ""]
+						: []),
+					...procedureErrors.map((error) =>
+						errorDeclaration(error, definitions),
+					),
+					`export const Errors = [${procedure.errors.join(", ")}] as const;`,
+					"",
+				],
 			),
 		);
-		exports.push([definitionsFile, sharedNames]);
+		operations.push({
+			name: procedure.name,
+			directory,
+			from,
+			dtos: join(origin.into, dtos),
+			payload: procedure.payload,
+			definitions,
+			structs: names.map((name) => roleOf(procedure, name)),
+			sameStruct: procedure.success === procedure.payload,
+			errors: procedure.errors,
+			successTag: procedure.successTag,
+		});
 	}
-	if (errors.length > 0) {
-		const names = errors.map(({ name }) => name);
-		files.push(
-			module(
-				errorsFile,
-				[
-					[
-						definitionsFile,
-						sharedIn(errors.flatMap((error) => refsOf(error))),
-					],
-				],
-				errors.map((error) => errorDeclaration(error, definitions)),
-			),
-		);
-		exports.push([errorsFile, names]);
+	for (const operation of bunSide) {
+		operations.push({
+			name: operation.name,
+			directory: `bun-side/${kebabCase(operation.name)}`,
+			from: operation.dtos,
+			dtos: operation.dtos,
+			payload: operation.request.name,
+			definitions: new Map([[operation.request.name, operation.request]]),
+			structs: [
+				"Request",
+				...(operation.sameStruct ? [] : ["Success"]),
+				...operation.structs,
+			],
+			sameStruct: operation.sameStruct,
+			errors: operation.errors,
+			successTag: undefined,
+		});
 	}
-	for (const { procedure, names } of uses) {
-		const path = `${directory}/${kebabCase(procedure.side)}/${kebabCase(procedure.name)}.ts`;
+
+	const exports: string[] = [];
+	for (const operation of operations) {
+		const namespace = `${operation.directory}/${kebabCase(operation.name)}-namespace.ts`;
+		const fromHere = (target: string) =>
+			relativeImport(join(origin.into, namespace), target);
+		const link = (target: string, text = target) =>
+			`[${text}](${fromHere(target)})`;
+		const source =
+			operation.from === operation.dtos
+				? ""
+				: ` from ${link(operation.from)}`;
 		files.push(
 			module(
-				path,
+				namespace,
+				operation.dtos,
 				[
-					[definitionsFile, sharedIn(names)],
-					[errorsFile, procedure.errors],
+					'import { Schema } from "effect";',
+					`import { failureOf, InvalidRequestOf, issueOf${operation.successTag === undefined ? "" : ", outputOf"} } from "${fromHere(origin.helpers)}";`,
+					`import * as Dto from "${fromHere(operation.dtos)}";`,
 				],
 				[
-					`/** Generated from ${link(path, origin.from)} by ${link(path, origin.by)}. */`,
-					procedureNamespace(procedure, names, shared, protocol),
+					`/** ${link(operation.dtos, `${operation.name}'s DTOs`)}, generated${source} by ${link(origin.by)}. */`,
+					operationNamespace(operation),
 				],
 			),
 		);
-		exports.push([path, [procedure.name]]);
+		exports.push(
+			`export { ${operation.name} } from "${relativeImport("generated.ts", namespace)}";`,
+		);
 	}
 	files.push({
 		path: "generated.ts",
 		source: [
-			...comment,
-			"",
-			...exports.map(
-				([file, names]) =>
-					`export { ${names.join(", ")} } from "${relativeImport("generated.ts", file)}";`,
-			),
+			...header(`${origin.cpp}, ${origin.bunSide}/`),
+			...exports,
 			"",
 		].join("\n"),
 	});
@@ -203,15 +248,15 @@ const roleNames = [
 	"InvalidRequest",
 	"Failure",
 	"Output",
+	"Errors",
 ] as const;
 
-function procedureNamespace(
+/** Fails on a struct the namespace couldn't name, or refer to by its name. */
+function checkNames(
 	procedure: Procedure,
 	names: readonly string[],
-	shared: ReadonlySet<string>,
-	protocol: Protocol,
-): string {
-	const { definitions } = protocol;
+	definitions: ReadonlyMap<string, Definition>,
+): void {
 	const { payload, success } = procedure;
 	for (const name of names) {
 		if (
@@ -223,8 +268,8 @@ function procedureNamespace(
 				`${name} would clash with ${procedure.name}.${name}; rename the struct`,
 			);
 		}
-		// The engine refers to a struct by its C++ name, which the namespace
-		// doesn't declare for the payload and success.
+		// The engine refers to a struct by its C++ name, which the DTOs don't
+		// declare for the payload and success.
 		for (const ref of refsOf(required(definitions, name))) {
 			if (ref === payload || ref === success) {
 				throw new Error(
@@ -235,45 +280,57 @@ function procedureNamespace(
 			}
 		}
 	}
-	const roles = new Map([[payload, "Request"]]);
-	if (success !== payload) roles.set(success, "Success");
-	const declarations = names
-		.filter((name) => !shared.has(name))
-		.map((name) =>
-			declare(required(definitions, name), definitions, roles.get(name)),
-		);
-	const sameStruct =
-		success === payload
+}
+
+/** The name a procedure's DTOs and namespace give a struct it uses. */
+function roleOf(procedure: Procedure, name: string): string {
+	if (name === procedure.payload) return "Request";
+	if (name === procedure.success) return "Success";
+	return name;
+}
+
+/**
+ * The namespace consumers use: each DTO with its type, so that hovers name
+ * it, what the generator derives from them, and what the helpers build.
+ */
+function operationNamespace(operation: Operation): string {
+	const named = (name: string, value: string) => [
+		`export const ${name} = ${value};`,
+		`export interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
+		"",
+	];
+	// First, as it fails on a struct that contains itself, which the shape
+	// would inline forever.
+	const path = pathDeclaration(operation);
+	return [
+		`export namespace ${operation.name} {`,
+		...operation.structs.flatMap((name) => named(name, `Dto.${name}`)),
+		...(operation.sameStruct
 			? [
 					"export const Success = Request;",
 					"export interface Success extends Request {}",
 					"",
 				]
-			: [];
-
-	// First, as it fails on a struct that contains itself, which the shape
-	// would inline forever.
-	const path = pathDeclaration(procedure, definitions);
-	return [
-		`export namespace ${procedure.name} {`,
-		...declarations,
-		shapeDeclaration(procedure, definitions),
-		...sameStruct,
+			: []),
+		...operation.errors.flatMap((name) => [
+			`export const ${name} = Dto.${name};`,
+			`export type ${name} = Dto.${name};`,
+			"",
+		]),
+		shapeDeclaration(operation),
 		path,
-		issueDeclaration,
-		invalidRequestDeclaration,
-		...(procedure.errors.length === 0
-			? [
-					"export const Failure = InvalidRequest;",
-					"export type Failure = InvalidRequest;",
-				]
-			: [
-					`export const Failure = Schema.Union([InvalidRequest, ${procedure.errors.join(", ")}]);`,
-					`export type Failure = InvalidRequest | ${procedure.errors.join(" | ")};`,
-				]),
+		...named("Issue", "issueOf(Path)"),
+		"export class InvalidRequest extends InvalidRequestOf<InvalidRequest>()(Issue) {}",
 		"",
-		`export const Output = Schema.Union([Schema.TaggedStruct(${JSON.stringify(procedure.successTag)}, Success.fields), ${["InvalidRequest", ...procedure.errors].join(", ")}]);`,
-		"export type Output = typeof Output.Type;",
+		"export const Failure = failureOf(InvalidRequest, Dto.Errors);",
+		"export type Failure = typeof Failure.Type;",
+		"",
+		...(operation.successTag === undefined
+			? []
+			: [
+					`export const Output = outputOf(${JSON.stringify(operation.successTag)}, Success, Failure);`,
+					"export type Output = typeof Output.Type;",
+				]),
 		"}",
 		"",
 	].join("\n");
@@ -347,10 +404,8 @@ function leafPaths(
 	return [[]];
 }
 
-function pathDeclaration(
-	procedure: Procedure,
-	definitions: ReadonlyMap<string, Definition>,
-): string {
+function pathDeclaration(procedure: Operation): string {
+	const { definitions } = procedure;
 	const paths = leafPaths(
 		{ $ref: `#/$defs/${procedure.payload}` },
 		definitions,
@@ -377,29 +432,6 @@ function pathDeclaration(
 	].join("\n");
 }
 
-/** A procedure's Issue: Path is its own, so the struct is too. */
-const issueDeclaration = [
-	"export const Issue = Schema.Struct({",
-	"message: Schema.String,",
-	"path: Path,",
-	"});",
-	"export interface Issue extends Schema.Schema.Type<typeof Issue> {}",
-	"",
-].join("\n");
-
-const invalidRequestDeclaration = [
-	'export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {',
-	"issues: Schema.NonEmptyArray(Issue),",
-	"}) {",
-	// A getter, not a field: the message never crosses the wire, and every
-	// decoded instance still has it.
-	"override get message(): string {",
-	'return this.issues.map((issue) => issue.message).join("; ");',
-	"}",
-	"}",
-	"",
-].join("\n");
-
 /**
  * Declares a definition under its own name, or, when `role` is set, under
  * the name its procedure's namespace gives it, such as `Request`.
@@ -420,9 +452,6 @@ function declare(
 		`export const ${name} = Schema.Struct({`,
 		...fields,
 		"});",
-		// An interface, not a type alias, so hovers say the name instead of
-		// expanding the struct.
-		`export interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
 		"",
 	].join("\n");
 }
@@ -510,10 +539,8 @@ function withoutExpected<T>(representation: T): T {
  * The request's fields with no checks, nested structs inlined: what a server
  * decodes when the C++ checks the rules, so that the issues are the C++'s.
  */
-function shapeDeclaration(
-	procedure: Procedure,
-	definitions: ReadonlyMap<string, Definition>,
-): string {
+function shapeDeclaration(procedure: Operation): string {
+	const { definitions } = procedure;
 	return [
 		"export const RequestShape = Schema.Struct({",
 		...fieldsOf(
@@ -632,15 +659,12 @@ function required(
 	return definition;
 }
 
+/** `AB` → `a_b`. */
+function snakeCase(identifier: string): string {
+	return kebabCase(identifier).replaceAll("-", "_");
+}
+
 /** `AB` → `a-b`. */
 function kebabCase(identifier: string): string {
 	return identifier.replaceAll(/(?<=.)([A-Z])/g, "-$1").toLowerCase();
-}
-
-function pascalCase(identifier: string): string {
-	return identifier
-		.split(/[_:]+/)
-		.filter((part) => part !== "")
-		.map((part) => part[0]?.toUpperCase() + part.slice(1))
-		.join("");
 }

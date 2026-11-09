@@ -12,8 +12,6 @@ export interface Definition {
 /** A procedure struct, never sent, naming what it takes and prints. */
 export interface Procedure {
 	readonly name: string;
-	/** The field of `Procedures` it's in, the side that serves it, such as `cppSide`. */
-	readonly side: string;
 	readonly payload: string;
 	/** The output's first alternative, without its tag. */
 	readonly success: string;
@@ -46,9 +44,9 @@ const taggedSuffix = "__tagged";
 const errorOwnFields = new Set(["name", "stack", "cause"]);
 
 /**
- * Reads the JSON Schema that reflect-cpp emits for `Procedures`, a struct
- * whose every field is a side, a `std::tuple` of the procedure structs it
- * serves, and undoes its encodings: `$defs` keys such as
+ * Reads the JSON Schema that reflect-cpp emits for `Procedures`, a
+ * `std::tuple` of procedure structs, and undoes its encodings: `$defs` keys
+ * such as
  * `protocol__Issue` or `protocol__InvalidRequest__tagged` become C++ names,
  * and the `_tag` property of a tagged alternative becomes its tag. Fails on
  * any shape the emitter does not support, rather than emitting something
@@ -58,34 +56,19 @@ export function normalize(document: unknown): Protocol {
 	if (!Predicate.isObject(document)) {
 		throw new Error("Expected a schema object");
 	}
-	const defs = Predicate.isObject(document.$defs) ? document.$defs : {};
-	const rootRef = document.$ref;
-	const root =
-		typeof rootRef === "string" && rootRef.startsWith(definitionRef)
-			? defs[rootRef.slice(definitionRef.length)]
-			: undefined;
-	const sides =
-		Predicate.isObject(root) && Predicate.isObject(root.properties)
-			? Object.entries(root.properties)
-			: [];
-	const roots = sides.flatMap(([side, tuple]) =>
-		Predicate.isObject(tuple) && Array.isArray(tuple.prefixItems)
-			? tuple.prefixItems.map((item) => ({
-					side,
-					ref:
-						Predicate.isObject(item) &&
-						typeof item.$ref === "string"
-							? item.$ref
-							: "",
-				}))
-			: [{ side, ref: "" }],
-	);
-	if (roots.length === 0 || roots.some(({ ref }) => ref === "")) {
+	const roots = Array.isArray(document.prefixItems)
+		? document.prefixItems.map((item) =>
+				Predicate.isObject(item) && typeof item.$ref === "string"
+					? item.$ref
+					: "",
+			)
+		: [];
+	if (roots.length === 0 || roots.includes("")) {
 		throw new Error(
-			"Expected a schema whose root is a struct of sides, each a tuple of procedure structs",
+			"Expected a schema whose root is a tuple of procedure structs",
 		);
 	}
-	const rootName = (rootRef as string).slice(definitionRef.length);
+	const defs = Predicate.isObject(document.$defs) ? document.$defs : {};
 
 	const names = new Map<string, { name: string; namespace: string }>();
 	for (const key of Object.keys(defs)) {
@@ -109,15 +92,14 @@ export function normalize(document: unknown): Protocol {
 
 	const definitions = new Map<string, Definition>();
 	for (const [key, raw] of Object.entries(defs)) {
-		if (key === rootName) continue;
 		const { name } = names.get(key) ?? { name: key };
 		definitions.set(name, normalizeDefinition(name, raw, rename));
 	}
 
-	const procedures = roots.map(({ side, ref }) => {
+	const procedures = roots.map((ref) => {
 		const root = names.get(ref.slice(definitionRef.length));
 		if (root === undefined) throw new Error(`Unknown procedure ${ref}`);
-		return { ...root, side, ...procedure(root.name, definitions) };
+		return { ...root, ...procedure(root.name, definitions) };
 	});
 	const invalidRequest = required(definitions, "InvalidRequest");
 	const issue = required(definitions, "Issue");
@@ -186,7 +168,7 @@ function checkErrorFields(
 function procedure(
 	name: string,
 	definitions: ReadonlyMap<string, Definition>,
-): Omit<Procedure, "name" | "side"> {
+): Omit<Procedure, "name"> {
 	const schema = definitions.get(name)?.schema;
 	const field = (property: string) => {
 		const properties = Predicate.isObject(schema?.properties)
@@ -339,6 +321,38 @@ function rewrite(
 		result.additionalProperties = false;
 	}
 	return result;
+}
+
+/**
+ * The JSON Schema that Effect's `toJsonSchemaDocument` writes for a
+ * hand-written struct, as the emitter takes one: descriptions dropped, and
+ * objects closed, as a Struct decodes. Fails on one with definitions, which
+ * no hand-written DTO needs yet.
+ */
+export function normalizeEffect(
+	document: JsonSchema.Document<"draft-2020-12">,
+	name: string,
+): Definition {
+	if (Object.keys(document.definitions).length > 0) {
+		throw new Error(
+			`${name} refers to definitions, which the emitter can't follow`,
+		);
+	}
+	const close = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(close);
+		if (!Predicate.isObject(value)) return value;
+		const result: Record<string, unknown> = {};
+		for (const [key, item] of Object.entries(value)) {
+			if (key !== "description") result[key] = close(item);
+		}
+		if (result.type === "object") result.additionalProperties = false;
+		return result;
+	};
+	const schema = close(document.schema) as JsonSchema.JsonSchema;
+	if (schema.type !== "object" || !Predicate.isObject(schema.properties)) {
+		throw new Error(`${name} must be a struct`);
+	}
+	return { name, schema, tag: undefined };
 }
 
 /**

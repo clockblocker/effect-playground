@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
-import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
+import { buildCpp, customCatBinary, customWcBinary } from "../scripts/cpp.ts";
 import { BffReader } from "../src/server/bun-side/bff-reader.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
+import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RpcRoutes } from "../src/server/protocols/rpc.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "rpc-"));
@@ -25,6 +26,7 @@ const server = (binary: string) =>
 					binary,
 					timeout: "1 minute",
 				}),
+				CustomWcCli.layerWith({ directory, binary: customWcBinary }),
 			]),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
@@ -151,6 +153,29 @@ describe("RPC", () => {
 					},
 				},
 			]);
+		},
+		600_000,
+	);
+
+	test.skipIf(Bun.which("cmake") === null)(
+		"counts with custom_wc, and answers with its success",
+		async () => {
+			buildCpp();
+			await Bun.write(
+				join(directory, "files/two.txt"),
+				"one two\nthree\n",
+			);
+			const response = await call(
+				"CustomWc",
+				{ file: "two.txt" },
+				undefined,
+				real.handler,
+			);
+			const [{ exit }] = await response.json();
+			expect(exit).toEqual({
+				_tag: "Success",
+				value: { lines: 2, words: 3, bytes: 14 },
+			});
 		},
 		600_000,
 	);

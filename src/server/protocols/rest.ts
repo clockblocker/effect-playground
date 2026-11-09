@@ -4,10 +4,15 @@ import {
 	type HttpApiError,
 	HttpApiMiddleware,
 } from "effect/http-api";
-import { CustomCat } from "../../shared/generated/generated.ts";
-import { BffApi, CustomCatSchemaErrors } from "../../shared/rest-api.ts";
+import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
+import {
+	BffApi,
+	CustomCatSchemaErrors,
+	CustomWcSchemaErrors,
+} from "../../shared/rest-api.ts";
 import { BffReader } from "../bun-side/bff-reader.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
+import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
 const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
@@ -37,9 +42,15 @@ const asInvalidRequest = <I>(method: {
 		}).pipe(Effect.orDie, Effect.flip);
 };
 
-const SchemaErrors = HttpApiMiddleware.layerSchemaErrorTransform(
-	CustomCatSchemaErrors,
-	asInvalidRequest(CustomCat),
+const SchemaErrors = Layer.mergeAll(
+	HttpApiMiddleware.layerSchemaErrorTransform(
+		CustomCatSchemaErrors,
+		asInvalidRequest(CustomCat),
+	),
+	HttpApiMiddleware.layerSchemaErrorTransform(
+		CustomWcSchemaErrors,
+		asInvalidRequest(CustomWc),
+	),
 );
 
 const FilesHandlers = HttpApiBuilder.group(
@@ -47,14 +58,16 @@ const FilesHandlers = HttpApiBuilder.group(
 	"files",
 	Effect.fn(function* (handlers) {
 		const reader = yield* BffReader;
-		const cli = yield* CustomCatCli;
+		const cat = yield* CustomCatCli;
+		const wc = yield* CustomWcCli;
 		return handlers
 			.handle("read", ({ params }) =>
 				reader
 					.read(params.name)
 					.pipe(Effect.map(({ contents }) => contents)),
 			)
-			.handle("copy", ({ payload }) => cli.run(payload));
+			.handle("copy", ({ payload }) => cat.run(payload))
+			.handle("count", ({ payload }) => wc.run(payload));
 	}),
 );
 

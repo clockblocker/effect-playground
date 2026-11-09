@@ -1,9 +1,12 @@
 // Runs the protocol pipeline: C++ structs → reflect-cpp → JSON Schema →
-// Effect Schema TypeScript. With --check, writes nothing and fails if any
+// Effect Schema TypeScript, a DTO module and a namespace per C++ operation,
+// and a namespace per bun-side operation from its hand-written DTOs. With
+// --check, writes nothing and fails if any
 // committed artifact is stale, or if src/shared/generated/ holds a file, or
 // a directory, the generator no longer writes.
 
 import {
+	existsSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -12,16 +15,20 @@ import {
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { buildCpp, protocolSchemaBinary } from "./cpp.ts";
-import { emit } from "./protocol/emit.ts";
+import { loadBunSide } from "./protocol/bun-side.ts";
+import { emit, type Origin } from "./protocol/emit.ts";
 import { normalize } from "./protocol/normalize.ts";
 
 const root = join(import.meta.dir, "..");
 const schemaPath = join(root, "cpp/protocol.schema.json");
 // Paths from the repository's root.
-const origin = {
-	from: "cpp/include/protocol.hpp",
+const origin: Origin = {
+	cpp: "cpp/include/protocol.hpp",
+	cppHeaders: "cpp/include/protocol",
+	bunSide: "src/shared/bun-side",
 	by: "scripts/generate.ts",
 	into: "src/shared/generated",
+	helpers: "src/shared/helpers/procedure.ts",
 };
 const generated = join(root, origin.into);
 const check = process.argv.includes("--check");
@@ -30,12 +37,18 @@ buildCpp();
 const emitted = Bun.spawnSync([protocolSchemaBinary], { stderr: "inherit" });
 if (emitted.exitCode !== 0) throw new Error("protocol_schema failed");
 const schema = emitted.stdout.toString();
-const files = emit(normalize(JSON.parse(schema)), origin).map(
-	({ path, source }) => {
-		const file = join(generated, path);
-		return [file, format(source, file)] as const;
-	},
-);
+const protocol = normalize(JSON.parse(schema));
+for (const { name } of protocol.procedures) {
+	const header = `${origin.cppHeaders}/${name.replaceAll(/(?<=.)([A-Z])/g, "_$1").toLowerCase()}.hpp`;
+	if (!existsSync(join(root, header))) {
+		throw new Error(`${name} has no header of its own, ${header}`);
+	}
+}
+const bunSide = await loadBunSide(root, origin.bunSide);
+const files = emit(protocol, bunSide, origin).map(({ path, source }) => {
+	const file = join(generated, path);
+	return [file, format(source, file)] as const;
+});
 
 const artifacts: ReadonlyArray<readonly [string, string]> = [
 	[schemaPath, schema],

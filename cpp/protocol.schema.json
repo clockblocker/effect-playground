@@ -1,6 +1,15 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$ref": "#/$defs/protocol__Procedures",
+    "type": "array",
+    "prefixItems": [
+        {
+            "$ref": "#/$defs/protocol__CustomCat"
+        },
+        {
+            "$ref": "#/$defs/protocol__CustomWc"
+        }
+    ],
+    "items": false,
     "$defs": {
         "protocol__CustomCat": {
             "type": "object",
@@ -97,6 +106,89 @@
                 "bytesCopied"
             ]
         },
+        "protocol__CustomWc": {
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "$ref": "#/$defs/protocol__CustomWcRequest"
+                },
+                "output": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/protocol__CustomWcSuccess__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/protocol__InvalidRequest__tagged"
+                        },
+                        {
+                            "$ref": "#/$defs/protocol__IoFailed__tagged"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "payload",
+                "output"
+            ]
+        },
+        "protocol__CustomWcRequest": {
+            "type": "object",
+            "properties": {
+                "file": {
+                    "description": "The file to count, such as \"hello.txt\", in the files directory.",
+                    "allOf": [
+                        {
+                            "type": "string",
+                            "minLength": 5
+                        },
+                        {
+                            "type": "string",
+                            "maxLength": 25
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^.+\\.txt$"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "file"
+            ]
+        },
+        "protocol__CustomWcSuccess__tagged": {
+            "type": "object",
+            "properties": {
+                "_tag": {
+                    "type": "string",
+                    "enum": [
+                        "Success"
+                    ]
+                },
+                "lines": {
+                    "type": "integer",
+                    "description": "How many newlines the file holds."
+                },
+                "words": {
+                    "type": "integer",
+                    "description": "How many runs of non-space characters it holds."
+                },
+                "bytes": {
+                    "type": "integer",
+                    "description": "How many bytes it holds."
+                }
+            },
+            "required": [
+                "_tag",
+                "lines",
+                "words",
+                "bytes"
+            ]
+        },
         "protocol__InvalidRequest__tagged": {
             "type": "object",
             "properties": {
@@ -164,106 +256,6 @@
             "required": [
                 "message",
                 "path"
-            ]
-        },
-        "protocol__Procedures": {
-            "type": "object",
-            "properties": {
-                "bunSide": {
-                    "type": "array",
-                    "prefixItems": [
-                        {
-                            "$ref": "#/$defs/protocol__ReadFile"
-                        }
-                    ],
-                    "items": false
-                },
-                "cppSide": {
-                    "type": "array",
-                    "prefixItems": [
-                        {
-                            "$ref": "#/$defs/protocol__CustomCat"
-                        }
-                    ],
-                    "items": false
-                }
-            },
-            "required": [
-                "bunSide",
-                "cppSide"
-            ]
-        },
-        "protocol__ReadFile": {
-            "type": "object",
-            "properties": {
-                "payload": {
-                    "$ref": "#/$defs/protocol__ReadFileRequest"
-                },
-                "output": {
-                    "anyOf": [
-                        {
-                            "$ref": "#/$defs/protocol__ReadFileSuccess__tagged"
-                        },
-                        {
-                            "$ref": "#/$defs/protocol__InvalidRequest__tagged"
-                        },
-                        {
-                            "$ref": "#/$defs/protocol__IoFailed__tagged"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "payload",
-                "output"
-            ]
-        },
-        "protocol__ReadFileRequest": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "description": "The file to read, such as \"hello.txt\", in the files directory.",
-                    "allOf": [
-                        {
-                            "type": "string",
-                            "minLength": 5
-                        },
-                        {
-                            "type": "string",
-                            "maxLength": 25
-                        },
-                        {
-                            "type": "string",
-                            "pattern": "^(?!\\.\\.?$)[^/\\\\]*$"
-                        },
-                        {
-                            "type": "string",
-                            "pattern": "^.+\\.txt$"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "name"
-            ]
-        },
-        "protocol__ReadFileSuccess__tagged": {
-            "type": "object",
-            "properties": {
-                "_tag": {
-                    "type": "string",
-                    "enum": [
-                        "Success"
-                    ]
-                },
-                "contents": {
-                    "type": "string",
-                    "description": "The whole file, decoded as UTF-8."
-                }
-            },
-            "required": [
-                "_tag",
-                "contents"
             ]
         }
     }

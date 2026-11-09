@@ -2,13 +2,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { emit } from "../scripts/protocol/emit.ts";
-import { normalize } from "../scripts/protocol/normalize.ts";
+import { loadBunSide } from "../scripts/protocol/bun-side.ts";
 import {
-	CustomCat,
-	IoFailed,
-	ReadFile,
-} from "../src/shared/generated/generated.ts";
+	type BunOperation,
+	emit,
+	type Origin,
+} from "../scripts/protocol/emit.ts";
+import { normalize, normalizeEffect } from "../scripts/protocol/normalize.ts";
+import { CustomCat, ReadFile } from "../src/shared/generated/generated.ts";
 import { fieldOf } from "../src/shared/helpers/field-of.ts";
 
 // The JSON forms both sides agree on.
@@ -117,12 +118,12 @@ describe("generated protocol", () => {
 			message: "Read-only file system",
 		} as const;
 		const failed = Schema.decodeUnknownSync(CustomCat.Failure)(wireForm);
-		expect(failed).toBeInstanceOf(IoFailed);
+		expect(failed).toBeInstanceOf(CustomCat.IoFailed);
 		expect(failed.message).toBe("Read-only file system");
 		expect(String(failed)).toBe("IoFailed: Read-only file system");
 		expect(Schema.encodeSync(CustomCat.Failure)(failed)).toEqual(wireForm);
 		expect(() =>
-			Schema.decodeUnknownSync(IoFailed)({ _tag: "IoFailed" }),
+			Schema.decodeUnknownSync(CustomCat.IoFailed)({ _tag: "IoFailed" }),
 		).toThrow();
 	});
 
@@ -139,7 +140,7 @@ describe("generated protocol", () => {
 		);
 		expect(
 			decode('{"_tag":"IoFailed","message":"Is a directory"}'),
-		).toBeInstanceOf(IoFailed);
+		).toBeInstanceOf(CustomCat.IoFailed);
 		expect(() => decode('{"bytesCopied":6}')).toThrow();
 	});
 
@@ -232,19 +233,10 @@ function fixture() {
 		required: ["payload", "output"],
 	});
 	return {
-		$ref: "#/$defs/a__b__Procedures",
+		type: "array",
+		prefixItems: [{ $ref: "#/$defs/a__b__Get" }],
+		items: false,
 		$defs: {
-			a__b__Procedures: {
-				type: "object",
-				properties: {
-					oneSide: {
-						type: "array",
-						prefixItems: [{ $ref: "#/$defs/a__b__Get" }],
-						items: false,
-					},
-				},
-				required: ["oneSide"],
-			},
 			a__b__Get: method("b__Query", "b__Found"),
 			a__b__Query: {
 				type: "object",
@@ -318,14 +310,25 @@ function fixture() {
 	};
 }
 
+const origin: Origin = {
+	cpp: "a.hpp",
+	cppHeaders: "a",
+	bunSide: "bun",
+	by: "gen.ts",
+	into: "out",
+	helpers: "src/shared/helpers/procedure.ts",
+};
+
 /** The files the emitter writes, by path. */
-const emittedFiles = (document: unknown) =>
+const emittedFiles = (
+	document: unknown,
+	bunSide: readonly BunOperation[] = [],
+) =>
 	new Map(
-		emit(normalize(document), {
-			from: "a.hpp",
-			by: "gen.ts",
-			into: "out",
-		}).map(({ path, source }) => [path, source]),
+		emit(normalize(document), bunSide, origin).map(({ path, source }) => [
+			path,
+			source,
+		]),
 	);
 
 /** The one file the emitter writes at `path`. */
@@ -346,62 +349,106 @@ const scratch = mkdtempSync(
 );
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** Imports the index the emitter writes for `document`. */
-async function load(document: unknown) {
+/**
+ * Imports the index the emitter writes for `document`, beside the helpers
+ * and the bun-side DTOs in `modules`, by path.
+ */
+async function load(
+	document: unknown,
+	bunSide: readonly BunOperation[] = [],
+	modules: Record<string, string> = {},
+) {
 	const directory = join(scratch, crypto.randomUUID());
-	for (const [path, source] of emittedFiles(document)) {
+	for (const [path, source] of Object.entries(modules)) {
 		await Bun.write(join(directory, path), source);
 	}
-	return import(join(directory, "generated.ts"));
+	for (const [path, source] of emittedFiles(document, bunSide)) {
+		await Bun.write(join(directory, origin.into, path), source);
+	}
+	await Bun.write(
+		join(directory, origin.helpers),
+		Bun.file(join(import.meta.dir, "..", origin.helpers)),
+	);
+	return import(join(directory, origin.into, "generated.ts"));
 }
 
 describe("emitter", () => {
-	test("writes a module per method under its side, and an index of them", () => {
+	test("writes a directory per C++ operation, and an index of them", () => {
 		const files = emittedFiles(fixture());
 		expect([...files.keys()]).toEqual([
-			"a-b/common/tagged-errors.ts",
-			"a-b/one-side/get.ts",
+			"cpp-side/get/get-dtos.ts",
+			"cpp-side/get/get-namespace.ts",
 			"generated.ts",
 		]);
 		expect(files.get("generated.ts")).toBe(
 			[
 				"/*",
 				"Generated",
-				"- from: a.hpp",
+				"- from: a.hpp, bun/",
 				"- by: gen.ts",
 				"*/",
 				"",
-				'export { Busy } from "./a-b/common/tagged-errors.ts";',
-				'export { Get } from "./a-b/one-side/get.ts";',
+				'export { Get } from "./cpp-side/get/get-namespace.ts";',
 				"",
 			].join("\n"),
 		);
-		const source = emittedFile(fixture(), "a-b/one-side/get.ts");
-		expect(source).toStartWith(
-			"/*\nGenerated\n- from: a.hpp\n- by: gen.ts\n*/\n",
+		expect(files.get("cpp-side/get/get-dtos.ts")).toStartWith(
+			"/*\nGenerated\n- from: a/get.hpp\n- by: gen.ts\n*/\n",
 		);
-		expect(source).toContain(
-			"/** Generated from [a.hpp](../../../a.hpp) by [gen.ts](../../../gen.ts). */\nexport namespace Get {",
-		);
-		expect(source).toContain(
-			'import { Busy } from "../common/tagged-errors.ts";',
-		);
-		expect(source).toContain("export namespace Get {");
-		expect(source).toContain("export const Request = Schema.Struct({");
-		expect(source).toContain(
-			"export interface Request extends Schema.Schema.Type<typeof Request> {}",
-		);
-		expect(source).toContain("export const Success = Schema.Struct({");
-		expect(source).toContain(
-			"export const Failure = Schema.Union([InvalidRequest, Busy]);\nexport type Failure = InvalidRequest | Busy;",
+		expect(files.get("cpp-side/get/get-namespace.ts")).toStartWith(
+			"/*\nGenerated\n- from: out/cpp-side/get/get-dtos.ts\n- by: gen.ts\n*/\n",
 		);
 		expect(emitted(fixture())).not.toContain("What the batch is called.");
-		// The header, and a link to the source on each namespace.
+		// The headers, and a link to the DTOs and the source on the namespace.
 		expect(emitted(fixture()).match(/\/[*/]/g)).toHaveLength(
-			emittedFiles(fixture()).size + 1,
+			files.size + 1,
 		);
+		expect(emitted(fixture())).not.toContain("__");
+	});
+
+	test("writes the DTOs as C++ declares them, and nothing else", () => {
+		const source = emittedFile(fixture(), "cpp-side/get/get-dtos.ts");
+		expect(source).toContain('import { Schema } from "effect";\n\n');
+		expect(source).toContain("export const Pair = Schema.Struct({");
+		expect(source).toContain("export const Request = Schema.Struct({");
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
-		expect(source).not.toContain("__");
+		expect(source).toContain("export const Success = Schema.Struct({");
+		expect(source).toContain(
+			'export class Busy extends Schema.TaggedError<Busy>()("Busy", {',
+		);
+		expect(source).toContain("export const Errors = [Busy] as const;");
+		expect(source).not.toMatch(
+			/interface|Path|Shape|InvalidRequest|Output/,
+		);
+		expect(source).not.toContain("Query");
+	});
+
+	test("writes the namespace from the DTOs, with a type for each, and the helpers", () => {
+		const source = emittedFile(fixture(), "cpp-side/get/get-namespace.ts");
+		expect(source).toContain(
+			"/** [Get's DTOs](./get-dtos.ts), generated from [a/get.hpp](../../../a/get.hpp) by [gen.ts](../../../gen.ts). */\nexport namespace Get {",
+		);
+		expect(source).toContain('import * as Dto from "./get-dtos.ts";');
+		expect(source).toContain(
+			'from "../../../src/shared/helpers/procedure.ts";',
+		);
+		for (const name of ["Pair", "Request", "Success"]) {
+			expect(source).toContain(
+				`export const ${name} = Dto.${name};\nexport interface ${name} extends Schema.Schema.Type<typeof ${name}> {}`,
+			);
+		}
+		expect(source).toContain(
+			"export const Busy = Dto.Busy;\nexport type Busy = Dto.Busy;",
+		);
+		expect(source).toContain(
+			"export const Issue = issueOf(Path);\nexport interface Issue extends Schema.Schema.Type<typeof Issue> {}",
+		);
+		expect(source).toContain(
+			"export class InvalidRequest extends InvalidRequestOf<InvalidRequest>()(Issue) {}",
+		);
+		expect(source).toContain(
+			"export const Failure = failureOf(InvalidRequest, Dto.Errors);\nexport type Failure = typeof Failure.Type;",
+		);
 		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
 		expect(source).not.toContain("Query");
 	});
@@ -480,24 +527,21 @@ describe("emitter", () => {
 		);
 	});
 
-	test("declares each other error once, a field message its message", async () => {
+	test("declares each other error in the DTOs, a field message its message", async () => {
 		expect(emitted(fixture()).match(/export class Busy /g)).toHaveLength(1);
-		expect(emittedFile(fixture(), "a-b/common/tagged-errors.ts")).toContain(
-			"export class Busy ",
-		);
-		const { Busy, Get } = await load(fixture());
+		const { Get } = await load(fixture());
 		const busy = Schema.decodeUnknownSync(Get.Failure)({
 			_tag: "Busy",
 			message: "the disk is busy",
 			seconds: 3,
 		});
-		expect(busy).toBeInstanceOf(Busy);
+		expect(busy).toBeInstanceOf(Get.Busy);
 		expect(busy.message).toBe("the disk is busy");
 	});
 
 	test("writes Output, the success tagged, or a failure", async () => {
 		expect(emitted(fixture())).toContain(
-			'export const Output = Schema.Union([Schema.TaggedStruct("Success", Success.fields), InvalidRequest, Busy]);',
+			'export const Output = outputOf("Success", Success, Failure);',
 		);
 		const { Get } = await load(fixture());
 		const decode = Schema.decodeUnknownSync(Get.Output);
@@ -568,17 +612,10 @@ describe("emitter", () => {
 	});
 });
 
-describe("emitter, for methods that share a struct", () => {
-	const shared = () => {
+describe("emitter, for operations that use the same struct", () => {
+	const both = () => {
 		const document = fixture();
-		const procedures = document.$defs.a__b__Procedures as {
-			properties: Record<string, unknown>;
-		};
-		procedures.properties.otherSide = {
-			type: "array",
-			prefixItems: [{ $ref: "#/$defs/a__b__Put" }],
-			items: false,
-		};
+		document.prefixItems.push({ $ref: "#/$defs/a__b__Put" });
 		const get = document.$defs.a__b__Get?.properties as {
 			output: { anyOf: object[] };
 		};
@@ -610,38 +647,112 @@ describe("emitter, for methods that share a struct", () => {
 		return document;
 	};
 
-	test("declares it once, in common/, which each method imports", () => {
-		const files = emittedFiles(shared());
-		expect(emitted(shared()).match(/export const Pair = /g)).toHaveLength(
-			1,
-		);
-		expect(files.get("a-b/common/definitions.ts")).toContain(
-			"export const Pair = ",
-		);
-		for (const path of ["a-b/one-side/get.ts", "a-b/other-side/put.ts"]) {
-			expect(files.get(path)).toContain(
-				'import { Pair } from "../common/definitions.ts";',
-			);
+	test("declares it, and each error, in each one's DTOs", () => {
+		const files = emittedFiles(both());
+		for (const operation of ["get/get", "put/put"]) {
+			const dtos = files.get(`cpp-side/${operation}-dtos.ts`);
+			expect(dtos).toContain("export const Pair = Schema.Struct({");
+			expect(dtos).toContain("export class Busy ");
 		}
-		expect(files.get("generated.ts")).toContain(
-			'export { Pair } from "./a-b/common/definitions.ts";',
+		expect([...files.keys()].some((path) => path.includes("common"))).toBe(
+			false,
 		);
 	});
 
-	test("gives each method its own Path and InvalidRequest", async () => {
-		const { Get, Put } = await load(shared());
+	test("gives each its own Path, InvalidRequest and errors", async () => {
+		const { Get, Put } = await load(both());
 		expect(Schema.is(Put.Path)(["pair", "input"])).toBe(true);
 		expect(Schema.is(Get.Path)(["pair", "input"])).toBe(false);
 		expect(Put.InvalidRequest).not.toBe(Get.InvalidRequest);
+		expect(Put.Busy).not.toBe(Get.Busy);
 	});
 
-	test("fails on a payload two methods share, rather than name it twice", () => {
-		const document = shared();
+	test("declares a payload both take as each one's Request", async () => {
+		const document = both();
 		Object.assign(document.$defs.a__b__Put?.properties as object, {
 			payload: { $ref: "#/$defs/a__b__Query" },
 		});
-		expect(() => emitted(document)).toThrow(
-			"Query is used by Get and Put, but Get declares it as Request",
+		const { Get, Put } = await load(document);
+		const request = { files: [], label: "ab" };
+		expect(Schema.is(Get.Request)(request)).toBe(true);
+		expect(Schema.is(Put.Request)(request)).toBe(true);
+	});
+});
+
+describe("emitter, for an operation the BFF serves itself", () => {
+	const dtos = [
+		'import { Schema } from "effect";',
+		"export const Request = Schema.Struct({",
+		"\tname: Schema.String.check(Schema.isMinCodePoints(2)),",
+		"});",
+		"export const Success = Schema.Struct({ size: Schema.Int });",
+		'export class Gone extends Schema.TaggedError<Gone>()("Gone", {}) {}',
+		"export const Errors = [Gone] as const;",
+		"",
+	].join("\n");
+	const look: BunOperation = {
+		name: "Look",
+		dtos: "bun/look/look-dtos.ts",
+		request: normalizeEffect(
+			Schema.toJsonSchemaDocument(
+				Schema.Struct({
+					name: Schema.String.check(Schema.isMinCodePoints(2)),
+				}),
+			),
+			"Request",
+		),
+		sameStruct: false,
+		structs: [],
+		errors: ["Gone"],
+	};
+
+	test("writes its namespace from its own DTOs, and no DTOs or Output", () => {
+		const files = emittedFiles(fixture(), [look]);
+		expect([...files.keys()]).toContain("bun-side/look/look-namespace.ts");
+		expect([...files.keys()]).not.toContain("bun-side/look/look-dtos.ts");
+		const source = files.get("bun-side/look/look-namespace.ts");
+		expect(source).toStartWith(
+			"/*\nGenerated\n- from: bun/look/look-dtos.ts\n- by: gen.ts\n*/\n",
 		);
+		expect(source).toContain(
+			'import * as Dto from "../../../bun/look/look-dtos.ts";',
+		);
+		expect(source).toContain(
+			"/** [Look's DTOs](../../../bun/look/look-dtos.ts), generated by [gen.ts](../../../gen.ts). */",
+		);
+		expect(source).toContain(
+			"export const RequestShape = Schema.Struct({\nname: Schema.String,\n});",
+		);
+		expect(source).not.toContain("Output");
+		expect(files.get("generated.ts")).toContain(
+			'export { Look } from "./bun-side/look/look-namespace.ts";',
+		);
+	});
+
+	test("builds the same namespace a C++ operation gets", async () => {
+		const { Look } = await load(fixture(), [look], {
+			"bun/look/look-dtos.ts": dtos,
+		});
+		expect(Schema.is(Look.Request)({ name: "a" })).toBe(false);
+		expect(Schema.is(Look.RequestShape)({ name: "a" })).toBe(true);
+		expect(Schema.is(Look.Path)(["name"])).toBe(true);
+		expect(Schema.is(Look.Path)(["size"])).toBe(false);
+		const gone = Schema.decodeUnknownSync(Look.Failure)({ _tag: "Gone" });
+		expect(gone).toBeInstanceOf(Look.Gone);
+	});
+
+	test("finds the BFF's own operations by their DTOs' file names", async () => {
+		const [readFile, ...others] = await loadBunSide(
+			join(import.meta.dir, ".."),
+			"src/shared/bun-side",
+		);
+		expect(others).toEqual([]);
+		expect(readFile).toMatchObject({
+			name: "ReadFile",
+			dtos: "src/shared/bun-side/read-file/read-file-dtos.ts",
+			sameStruct: false,
+			structs: [],
+			errors: ["IoFailed"],
+		});
 	});
 });
