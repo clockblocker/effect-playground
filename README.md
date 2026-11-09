@@ -377,9 +377,8 @@ src/shared/generated/
    would shadow the global one), and, for a C++ operation, `Output`, what it
    prints, the success tagged. Each name is both the schema and its type, so
    `CustomCat.Success` works in either position, and TypeScript 7 hovers read
-   `CustomCat.Success`. Every generated file starts with what it's generated
-   from and by, and a namespace's JSDoc repeats it, so hovering `CustomCat`
-   names its DTOs, whose header names their source.
+   `CustomCat.Success`. Each namespace links to its DTOs, which link to the
+   C++ header.
 4. The page's forms validate with each operation's `Request`; the RPC
    payloads, the REST bodies and the MCP tools' parameters are their
    `RequestShape`s.

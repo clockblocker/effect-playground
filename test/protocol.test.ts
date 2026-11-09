@@ -389,7 +389,7 @@ describe("emitter", () => {
 			"/*\nGenerated\n- from: out/cpp-side/get/get-dtos.ts\n- by: gen.ts\n*/\n",
 		);
 		expect(emitted(fixture())).not.toContain("What the batch is called.");
-		// The headers, and the namespace's JSDoc, which repeats its header.
+		// The headers, and a link to the DTOs and the source on the namespace.
 		expect(emitted(fixture()).match(/\/[*/]/g)).toHaveLength(
 			files.size + 1,
 		);
@@ -416,7 +416,7 @@ describe("emitter", () => {
 	test("writes the namespace from the DTOs, with a type for each, and the helpers", () => {
 		const source = emittedFile(fixture(), "cpp-side/get/get-namespace.ts");
 		expect(source).toContain(
-			"/**\nGenerated\n- from: out/cpp-side/get/get-dtos.ts\n- by: gen.ts\n*/\nexport namespace Get {",
+			"/** [Get's DTOs](./get-dtos.ts), generated from [a/get.hpp](../../../a/get.hpp) by [gen.ts](../../../gen.ts). */\nexport namespace Get {",
 		);
 		expect(source).toContain('import * as Dto from "./get-dtos.ts";');
 		expect(source).toContain(
@@ -712,7 +712,7 @@ describe("emitter, for an operation the BFF serves itself", () => {
 		const namespace = files.get("bun-side/look/look-namespace.ts");
 		expect(namespace).toContain('import * as Dto from "./look-dtos.ts";');
 		expect(namespace).toContain(
-			"/**\nGenerated\n- from: out/bun-side/look/look-dtos.ts\n- by: gen.ts\n*/\nexport namespace Look {",
+			"/** [Look's DTOs](./look-dtos.ts), generated from [bun/look/look-dtos.ts](../../../bun/look/look-dtos.ts) by [gen.ts](../../../gen.ts). */",
 		);
 		expect(namespace).toContain(
 			"export const RequestShape = Schema.Struct({\nname: Schema.String,\n});",

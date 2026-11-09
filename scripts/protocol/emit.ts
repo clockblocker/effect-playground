@@ -89,12 +89,14 @@ export function emit(
 	bunSide: readonly BunOperation[],
 	origin: Origin,
 ): readonly File[] {
-	const generated = (from: string) => [
+	const header = (from: string) => [
+		"/*",
 		"Generated",
 		`- from: ${from}`,
 		`- by: ${origin.by}`,
+		"*/",
+		"",
 	];
-	const header = (from: string) => ["/*", ...generated(from), "*/", ""];
 	/** The file at `path`, generated from `from`: its imports, then its body. */
 	const module = (
 		path: string,
@@ -194,6 +196,8 @@ export function emit(
 		);
 		const fromHere = (target: string) =>
 			relativeImport(join(origin.into, namespace), target);
+		const link = (target: string, text = target) =>
+			`[${text}](${fromHere(target)})`;
 		files.push(
 			module(
 				namespace,
@@ -204,10 +208,7 @@ export function emit(
 					`import * as Dto from "${relativeImport(namespace, dtos)}";`,
 				],
 				[
-					// A JSDoc, so that hovering the namespace says so too.
-					"/**",
-					...generated(join(origin.into, dtos)),
-					"*/",
+					`/** ${link(join(origin.into, dtos), `${operation.name}'s DTOs`)}, generated from ${link(operation.from)} by ${link(origin.by)}. */`,
 					operationNamespace(operation),
 				],
 			),

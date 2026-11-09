@@ -12,11 +12,7 @@ import {
 } from "../../../helpers/procedure.ts";
 import * as Dto from "./search-file-dtos.ts";
 
-/**
-Generated
-- from: src/shared/generated/bun-side/search-file/search-file-dtos.ts
-- by: scripts/generate.ts
-*/
+/** [SearchFile's DTOs](./search-file-dtos.ts), generated from [src/server/bun-side/search-file/search-file-dtos.ts](../../../../server/bun-side/search-file/search-file-dtos.ts) by [scripts/generate.ts](../../../../../scripts/generate.ts). */
 export namespace SearchFile {
 	export const Request = Dto.Request;
 	export interface Request extends Schema.Schema.Type<typeof Request> {}
