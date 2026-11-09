@@ -2,7 +2,7 @@ import { useAtom } from "@effect/atom-react";
 import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { ReadFile } from "../../shared/generated/generated.ts";
-import { readFile } from "../clients.ts";
+import { readFile } from "../data-access/data-access.ts";
 import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 
 export function ReadFileForm({

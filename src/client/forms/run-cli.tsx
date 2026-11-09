@@ -2,7 +2,7 @@ import { useAtom } from "@effect/atom-react";
 import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { CustomCat } from "../../shared/generated/generated.ts";
-import { customCat } from "../clients.ts";
+import { customCat } from "../data-access/data-access.ts";
 import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 
 export function RunCliForm({

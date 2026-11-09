@@ -454,9 +454,10 @@ type tests, which `bun run check` runs.
   CLI runner and a service per C++ operation, `CustomCatCli` and
   `CustomWcCli`, and `protocols/` the three transports, which `main.ts`
   mounts on one router.
-- `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
-  `BffRpcClient`, with a mutation per procedure, `readFile`, `searchFile`,
-  `customCat` and `customWc`.
+- `src/client/data-access/` builds the RPC client as `AtomRpc` atoms
+  (`effect/reactivity`), `BffRpcClient` in `clients/bff-rpc-client.ts`, and
+  `data-access.ts` gives the forms a mutation per procedure, `readFile`,
+  `searchFile`, `customCat` and `customWc`.
   The client's runtime is an atom too, so the protocol is built once, not per
   submit. `main.tsx` wraps the page in `@effect/atom-react`'s
   `RegistryProvider`, which holds the atoms. `App` renders four forms,

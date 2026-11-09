@@ -2,7 +2,7 @@ import { useAtom } from "@effect/atom-react";
 import { Exit, Match, Option } from "effect";
 import { useForm } from "react-hook-form";
 import type { SearchFile } from "../../shared/generated/generated.ts";
-import { searchFile } from "../clients.ts";
+import { searchFile } from "../data-access/data-access.ts";
 import { Outcome, setIssues, TextField, useSchemaResolver } from "./shared.tsx";
 
 export function SearchForm({
