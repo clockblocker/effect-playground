@@ -168,11 +168,16 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 	});
 
-	test("rejects a missing flag as a usage error, in reflect-cpp's words", async () => {
-		const result = await customCat(["--input-file=hello.txt"]);
-		expect(result.exitCode).toBe(2);
-		expect(result.stdout).toBe("");
-		expect(result.stderr).toContain("Field named 'output-file' not found.");
+	test("reports a missing flag as an issue, in reflect-cpp's words", async () => {
+		const result = await customCat(["--input-file=x.md"]);
+		expect(result.exitCode).toBe(1);
+		expect(invalidRequest(result.stdout).issues).toEqual([
+			{ message: tooShort(4), path: ["inputFile"] },
+			{
+				message: "Field named 'output-file' not found.",
+				path: ["outputFile"],
+			},
+		]);
 	});
 
 	test("counts a name's code points, not its bytes, as the form does", async () => {
@@ -223,17 +228,24 @@ describe.skipIf(Bun.which("cmake") === null)("custom_cat", () => {
 		]);
 	});
 
-	test("rejects an unknown flag as a usage error", async () => {
+	test("reports an unknown flag under its own name, which no Path has", async () => {
 		const result = await customCat([
 			"--input-file=hello.txt",
 			"--output-file=copy.txt",
 			"--verbose",
 		]);
-		expect(result.stdout).toBe("");
-		expect(result.exitCode).toBe(2);
-		expect(result.stderr).toStartWith(
-			"custom_cat: Value named 'verbose' not used.",
-		);
+		expect(result.exitCode).toBe(1);
+		expect(JSON.parse(result.stdout)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [
+				{
+					message: "Value named 'verbose' not used.",
+					path: ["verbose"],
+				},
+			],
+		});
+		expect(() => output(result.stdout)).toThrow();
+		expect(await file("copy.txt").exists()).toBe(false);
 	});
 
 	test("reports a missing x.txt as an issue, but a directory named x.txt as IoFailed", async () => {

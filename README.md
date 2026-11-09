@@ -76,8 +76,9 @@ error channel), a `Die` (a defect) or an `Interrupt`.
   `custom_cat timed out after 5000 ms` after five seconds, by default. Only
   the BFF sees it, so it's declared in TS, in `src/shared/cli-failed.ts`.
 - `ContractMismatch` is the BFF and `custom_cat` disagreeing: output that
-  doesn't decode, output whose tag isn't its exit code's, a usage error
-  (the BFF built the flags) or an exit code `custom_cat` doesn't have.
+  doesn't decode, such as an issue at a path no request has (an unknown
+  flag: the BFF built the flags), output whose tag isn't its exit code's, or
+  an exit code `custom_cat` doesn't have.
   It carries the exit code, stdout, stderr and the issue, and the BFF logs
   it where it happens. It stays a defect: no caller can act on it.
 - A timeout is `CliFailed` to the caller; inside `CustomCatCli` it
@@ -125,8 +126,10 @@ middleware on the copy endpoint turns a body that doesn't decode into
 Bun, plus a C++20 toolchain: CMake 3.24 or newer,
 Ninja and a recent Clang or GCC. On macOS, `xcode-select --install` and
 `brew install cmake ninja`. The first build fetches
-[reflect-cpp](https://github.com/getml/reflect-cpp) v0.26.2 from GitHub, with
-the yyjson it bundles; nothing else is installed.
+[reflect-cpp](https://github.com/munich-data-engineering/reflect-cpp) from
+GitHub, at a commit on `main` after v0.27.1, the first with
+`rfl::Error::details()`, with the yyjson it bundles; nothing else is
+installed.
 
 ## Run
 
@@ -195,11 +198,12 @@ reader (`rfl/cli.hpp`) spells in kebab-case. Both names follow the read's
 rules, and only the input must exist. What it prints, and its exit codes:
 
 - 0, copied: stdout is `{"_tag":"Success","bytesCopied":18}`.
-- 1, a field's value is wrong: stdout is the `InvalidRequest`, with
-  every issue, such as
+- 1, the flags are wrong: stdout is the `InvalidRequest`, with every
+  issue, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["inputFile"]},{"message":"String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["outputFile"]}]}`.
-- 2, a usage error, such as a missing or unknown flag: reflect-cpp's
-  error, on stderr, e.g. `Field named 'output-file' not found.`
+  A missing flag is an issue on its field, in reflect-cpp's words:
+  `Field named 'output-file' not found.`, and an unknown one an issue under
+  its own name, `["verbose"]`, which no `Path` has.
 - 3, a file couldn't be read or written: stdout is the `IoFailed`, such as
   `{"_tag":"IoFailed","message":"Is a directory"}`.
 - 4, anything else, which would be a bug in `custom_cat`: on stderr.
@@ -212,8 +216,8 @@ decodes stdout once with `CustomCat.Output`, checks that its tag is its
 exit code's, and dispatches with `Match.valueTags`: `Success` succeeds with
 `{ bytesCopied }`, without its tag, and the others fail. A new kind of
 output in C++ doesn't compile in the BFF until it's handled. Exit 4 is a
-defect; exit 2, any other code, output that doesn't decode, or a tag that
-isn't its exit code's is a `ContractMismatch`.
+defect; any other code, output that doesn't decode, or a tag that isn't its
+exit code's is a `ContractMismatch`.
 `CustomCatCli.layerWith({ directory, binary, timeout })` sets where it runs,
 which executable it runs and how long it may take; the tests point `binary`
 at shell scripts.
@@ -229,10 +233,9 @@ its success, whose `using Tag = rfl::Literal<"Success">` names it,
 camelCase in JSON, through reflect-cpp's `SnakeCaseToCamelCase`
 (`protocol::Wire`).
 
-A field carries its rules in its type, a `Checked<Base, Validators...>`
-(`cpp/include/checked.hpp`) of reflect-cpp validators: reflect-cpp's own
-where it has one, and otherwise a struct with reflect-cpp's validator
-interface, `static rfl::Result<T> validate(T)`:
+A field carries its rules in its type, an `rfl::Validator` of reflect-cpp
+validators: reflect-cpp's own where it has one, and otherwise a struct with
+reflect-cpp's validator interface, `static rfl::Result<T> validate(T)`:
 
 ```cpp
 using PlainName =
@@ -241,26 +244,28 @@ using TxtFile = rfl::PatternValidator<R"(^.+\.txt$)", ".txt file name">;
 struct NotALink {
 	static rfl::Result<std::string> validate(const std::string& name);
 };
-using Text = Checked<std::string, Utf8>;
-using Name =
-	Checked<Text, CodePoints<rfl::Minimum<5>>, CodePoints<rfl::Maximum<25>>>;
-using FileName = Checked<Name, PlainName, TxtFile>;
-using InFiles = Checked<FileName, NotALink>;
-using Existing = Checked<InFiles, ExistingFile>;
+template <class... More>
+using InFilesName =
+	rfl::Validator<std::string,
+				   Checks<CodePoints<rfl::Minimum<5>>,
+						  CodePoints<rfl::Maximum<25>>, PlainName, TxtFile,
+						  NotALink, More...>>;
+using InFiles = InFilesName<>;
+using Existing = InFilesName<ExistingFile>;
 ```
 
-An issue's message is the validator's error, `rfl::Error::what()`, as it
-is:
+An issue's message is the validator's error as reflect-cpp reports it:
 
 | Rule | Validator | Message |
 |---|---|---|
-| valid UTF-8 | `Utf8` | `String is not valid UTF-8.` |
+| valid UTF-8 | `CodePoints<…>` | `String is not valid UTF-8.` |
 | 5 or more characters | `CodePoints<rfl::Minimum<5>>` | `Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.` |
 | 25 or fewer | `CodePoints<rfl::Maximum<25>>` | `Code point count validation failed: Value expected to be less than or equal to 25, but got 27.` |
 | a plain name | `PlainName` | `String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.` |
 | `.txt` | `TxtFile` | `String 'config.json' did not match format '.txt file name': '^.+\.txt$'.` |
 | not a link | `NotALink` | `"out.txt" is a link, which could lead outside the files directory` |
 | exists | `ExistingFile` | the `std::error_code`'s message: `No such file or directory` |
+| present | none: reflect-cpp's read | `Field named 'output-file' not found.` |
 | not the input | `DifferentNames` | `Must not be the input file` |
 | not a hard link to the input | `DifferentFiles` | `"same.txt" is the input file under another name` |
 
@@ -269,35 +274,30 @@ bytes, with `Size`'s schema: JSON Schema's `minLength` and `maxLength`, and
 so the form, count code points too, so both sides take the same names. The
 comparison and its words are the wrapped `rfl::Minimum` or `rfl::Maximum`'s.
 
-A `Checked` whose base is another one only runs its validators on a value
-the base accepts, so `x.md` is too short and nothing else, and the rules
-come before what the files say. `input_file` is `Existing` and
-`output_file` `InFiles`, so only the input must exist.
+`Checks<…>` is `rfl::AllOf`, which stops at a field's first rule that fails,
+so `x.md` is too short and nothing else, and the rules come before what the
+files say. It differs only in its schema, which leaves out the validators
+that have none, `NotALink` and `ExistingFile`: `rfl::AllOf` wants one from
+each. `input_file` is `Existing` and `output_file` `InFiles`, so only the
+input must exist.
 
-A rule across fields lives on the request, in its `Rules`: a validator of
-the struct, which names the member its issue goes on:
+A rule across fields is a validator of the request, which puts its error on
+a field with `error_on`:
 
 ```cpp
 struct DifferentNames {
-	static constexpr auto field = &CustomCatRequest::output_file;
 	static rfl::Result<CustomCatRequest> validate(
-		const CustomCatRequest& request);
+		const CustomCatRequest& request);  // error_on("output_file", …)
 };
-// in CustomCatRequest:
-using Rules = std::tuple<DifferentNames, DifferentFiles>;
+using CustomCatRules = rfl::AllOf<DifferentNames, DifferentFiles>;
 ```
 
-They run in order once every field passes its own rules, and stop at the
-first that fails, as a `Checked`'s refinements do.
-
-reflect-cpp reads a request without the rules: any value fits a `Checked`.
-A missing or unknown field fails that read, a usage error in reflect-cpp's
-own words. Then `validate::validate` (`cpp/include/validate.hpp`) walks the
-request's fields with `rfl::to_view`, into nested structs and arrays, runs
-every field's validators, then each struct's, and collects an `Issue` for
-each that fails, its path the fields' wire names and the arrays' indexes,
-such as `["files", 2, "input"]`: reflect-cpp gives each issue its message,
-and the walker its path.
+`custom_cat` reads the request with reflect-cpp, which runs every field's
+rules and fails with each that does, then `CustomCatRules`, in order, which
+stop at the first that fails. Either way the read's `rfl::Error` lists each
+failure in `details()`, a message and a path, and `protocol::issues` makes
+each an `Issue`, its path the fields' wire names, `["inputFile"]`, and an
+array's indexes as numbers.
 
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
@@ -358,18 +358,17 @@ errors, and on an error's field that would shadow the `Error`'s own, such as
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
-bun run test             # builds the C++; runs custom_cat, the walker, the BFF and the forms' matching
+bun run test             # builds the C++; runs custom_cat, the BFF and the forms' matching
 bun run generate:check
 ```
 
-The tests that run the C++ skip when `cmake` isn't on the PATH. The walker's
-runs `cpp/build/validate_fixture`, a test-only executable that validates a
-request with an array of structs. `test/protocol-types.test.ts` holds the
+The tests that run the C++ skip when `cmake` isn't on the PATH.
+`test/protocol-types.test.ts` holds the
 type tests, which `bun run check` runs.
 
 ## Layout
 
-- `cpp/` holds the protocol's structs, `Checked` and the walker, `custom_cat`
+- `cpp/` holds the protocol's structs and their validators, `custom_cat`
   and the tool that emits the schema. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import: the REST API
   (`BffApi`), the RPC group (`BffRpcs`), `CliFailed`, `ReadFile`, `fieldOf`,

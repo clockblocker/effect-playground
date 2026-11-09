@@ -9,12 +9,13 @@
 //   what it prints, `Output`: a tagged union of its success, which becomes
 //   `Success`, InvalidRequest, then any error that isn't about a field.
 // - A field's `rfl::Description` becomes its JSDoc.
-// - A request's field carries its rules in its type, a Checked<…> of
-//   reflect-cpp validators (see checked.hpp). Each failing validator becomes
-//   an Issue whose message is the validator's own error.
-// - A rule across fields lives on the request, in its `Rules` (see
-//   validate.hpp), and names the field its issue goes on.
+// - A request's field carries its rules in its type, an rfl::Validator of
+//   Checks<…>. reflect-cpp reads a request with them, and each failure it
+//   reports, rfl::Error::details(), becomes an Issue (see issues()).
+// - A rule across fields is a validator of the request, in its rfl::AllOf
+//   such as CustomCatRules, that puts its error on a field (see error_on()).
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -22,12 +23,12 @@
 #include <rfl.hpp>
 #include <rfl/json.hpp>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
-
-#include "checked.hpp"
 
 namespace protocol {
 
@@ -54,6 +55,77 @@ struct InvalidRequest {
 		issues;
 };
 
+// A field's name on the wire: reflect-cpp's CLI reader spells input_file
+// input-file, and its path segments with it.
+inline std::string wire_name(std::string_view name) {
+	std::string wire;
+	bool upper = false;
+	for (const char c : name) {
+		if (c == '-' || c == '_') {
+			upper = true;
+		} else {
+			wire += upper ? static_cast<char>(std::toupper(c)) : c;
+			upper = false;
+		}
+	}
+	return wire;
+}
+
+// An issue per failure reflect-cpp reports, its message and its path.
+inline std::vector<Issue> issues(rfl::Error&& error) {
+	std::vector<Issue> issues;
+	for (auto& detail : std::move(error).details()) {
+		std::vector<PathSegment> path;
+		for (const auto& segment : detail.path) {
+			if (const auto* name = std::get_if<std::string>(&segment)) {
+				path.emplace_back(wire_name(*name));
+			} else {
+				path.emplace_back(static_cast<int>(std::get<std::size_t>(segment)));
+			}
+		}
+		issues.push_back(
+			Issue{.message = std::move(detail.message), .path = std::move(path)});
+	}
+	return issues;
+}
+
+// An error that reflect-cpp reports on the field `name`, for a rule across
+// fields.
+inline rfl::Unexpected<rfl::Error> error_on(std::string name,
+											std::string message) {
+	return rfl::error(rfl::Error(
+		message, {rfl::ErrorDetail{.path = {std::move(name)}, .message = message}}));
+}
+
+template <class Validator, class T>
+concept HasSchema = requires { Validator::template to_schema<T>(); };
+
+// rfl::AllOf, which stops at the first validator that fails, but whose JSON
+// Schema leaves out the validators that have none, such as NotALink:
+// reflect-cpp's own wants one from each.
+template <class... Validators>
+struct Checks {
+	template <class T>
+	static rfl::Result<T> validate(T value) noexcept {
+		return rfl::AllOf<Validators...>::validate(std::move(value));
+	}
+
+	template <class T>
+	static rfl::parsing::schema::ValidationType to_schema() {
+		using ValidationType = rfl::parsing::schema::ValidationType;
+		std::vector<ValidationType> types;
+		(
+			[&] {
+				if constexpr (HasSchema<Validators, T>) {
+					types.push_back(Validators::template to_schema<T>());
+				}
+			}(),
+			...);
+		if (types.size() == 1) return types.front();
+		return ValidationType{ValidationType::AllOf{.types_ = std::move(types)}};
+	}
+};
+
 // The code points of a UTF-8 string, or nothing if it isn't valid UTF-8.
 inline std::optional<std::size_t> code_points(const std::string& value) {
 	std::size_t count = 0;
@@ -75,13 +147,6 @@ inline std::optional<std::size_t> code_points(const std::string& value) {
 	}
 	return count;
 }
-
-struct Utf8 {
-	static rfl::Result<std::string> validate(const std::string& value) {
-		if (!code_points(value)) return rfl::error("String is not valid UTF-8.");
-		return value;
-	}
-};
 
 // rfl::Size counts bytes, but the minLength and maxLength its schema emits
 // count code points, as the generated TS does. This counts code points, with
@@ -154,14 +219,17 @@ struct ExistingFile {
 	}
 };
 
-// Each refinement only checks a name its base accepts: "x.md" is too short,
-// and no more. The rules come first, then what the files say.
-using Text = Checked<std::string, Utf8>;
-using Name =
-	Checked<Text, CodePoints<rfl::Minimum<5>>, CodePoints<rfl::Maximum<25>>>;
-using FileName = Checked<Name, PlainName, TxtFile>;
-using InFiles = Checked<FileName, NotALink>;
-using Existing = Checked<InFiles, ExistingFile>;
+// A name in files/, with its rules in order: a field reports the first that
+// fails, so "x.md" is too short and no more, and the rules come before what
+// the files say.
+template <class... More>
+using InFilesName =
+	rfl::Validator<std::string,
+				   Checks<CodePoints<rfl::Minimum<5>>,
+						  CodePoints<rfl::Maximum<25>>, PlainName, TxtFile,
+						  NotALink, More...>>;
+using InFiles = InFilesName<>;
+using Existing = InFilesName<ExistingFile>;
 
 // A file couldn't be read or written for a reason that isn't about its name,
 // such as a directory where a file should be, or a read-only disk.
@@ -170,9 +238,6 @@ struct IoFailed {
 					 std::string>
 		message;
 };
-
-struct DifferentNames;
-struct DifferentFiles;
 
 struct CustomCatRequest {
 	rfl::Description<"The file to copy, such as \"hello.txt\", in the files "
@@ -184,16 +249,13 @@ struct CustomCatRequest {
 		"if it exists.",
 		InFiles>
 		output_file;
-
-	using Rules = std::tuple<DifferentNames, DifferentFiles>;
 };
 
 struct DifferentNames {
-	static constexpr auto field = &CustomCatRequest::output_file;
 	static rfl::Result<CustomCatRequest> validate(
 		const CustomCatRequest& request) {
 		if (request.input_file().value() == request.output_file().value()) {
-			return rfl::error("Must not be the input file");
+			return error_on("output_file", "Must not be the input file");
 		}
 		return request;
 	}
@@ -201,19 +263,23 @@ struct DifferentNames {
 
 // A hard link: NotALink already refuses symbolic ones.
 struct DifferentFiles {
-	static constexpr auto field = &CustomCatRequest::output_file;
 	static rfl::Result<CustomCatRequest> validate(
 		const CustomCatRequest& request) {
 		const auto& output = request.output_file().value();
 		std::error_code error;
 		if (std::filesystem::equivalent(in_files(request.input_file().value()),
 										in_files(output), error)) {
-			return rfl::error("\"" + output +
-							  "\" is the input file under another name");
+			return error_on("output_file",
+							"\"" + output +
+								"\" is the input file under another name");
 		}
 		return request;
 	}
 };
+
+// The rules across a request's fields, which run once reflect-cpp has read
+// it, every field passing its own, and stop at the first that fails.
+using CustomCatRules = rfl::AllOf<DifferentNames, DifferentFiles>;
 
 struct CustomCatSuccess {
 	using Tag = rfl::Literal<"Success">;

@@ -11,9 +11,6 @@ export const customCatBinary = join(build, "custom_cat");
 /** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
 export const protocolSchemaBinary = join(build, "protocol_schema");
 
-/** Prints the issues of a nested request; see `cpp/test/validate_fixture.cpp`. */
-export const validateFixtureBinary = join(build, "validate_fixture");
-
 /**
  * Configures the CMake project on first use, then builds it incrementally.
  * The first build fetches reflect-cpp from GitHub.

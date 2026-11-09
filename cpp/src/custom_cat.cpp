@@ -18,14 +18,12 @@
 #include <system_error>
 
 #include "protocol.hpp"
-#include "validate.hpp"
 
 namespace {
 
 using namespace protocol;
 
 constexpr int exit_invalid = 1;
-constexpr int exit_usage = 2;
 constexpr int exit_io = 3;
 constexpr int exit_unexpected = 4;
 
@@ -110,20 +108,18 @@ CustomCatSuccess copy(const CustomCatRequest& request) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-	const auto request =
-		rfl::cli::read<CustomCatRequest, rfl::NoExtraFields>(argc, argv);
-	if (!request) {
-		std::cerr << "custom_cat: " << request.error().what() << "\n";
-		return exit_usage;
-	}
 	try {
-		if (auto issues = validate::validate(*request); !issues.empty()) {
-			std::cout << rfl::json::write<Wire>(CustomCatOutput(
-							 InvalidRequest{.issues = std::move(issues)}))
+		auto request =
+			rfl::cli::read<CustomCatRequest, rfl::NoExtraFields>(argc, argv)
+				.and_then(CustomCatRules::validate<CustomCatRequest>);
+		if (!request) {
+			std::cout << rfl::json::write<Wire>(CustomCatOutput(InvalidRequest{
+							 .issues = issues(std::move(request).error())}))
 					  << "\n";
 			return exit_invalid;
 		}
-		std::cout << rfl::json::write<Wire>(CustomCatOutput(copy(*request)))
+		std::cout << rfl::json::write<Wire>(
+						 CustomCatOutput(copy(*request)))
 				  << "\n";
 		return 0;
 	} catch (const IoFailure& failure) {
