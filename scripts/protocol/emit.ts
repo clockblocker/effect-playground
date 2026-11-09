@@ -1,29 +1,46 @@
+import { dirname, join, relative } from "node:path/posix";
 import { SchemaRepresentation } from "effect";
 import type { Definition, Procedure, Protocol } from "./normalize.ts";
 
+/** Where the generated files come from and go, from the repository's root. */
+export interface Origin {
+	/** The source, such as `cpp/include/protocol.hpp`. */
+	readonly from: string;
+	/** The generator, such as `scripts/generate.ts`. */
+	readonly by: string;
+	/** The directory the files go in, such as `src/shared/generated`. */
+	readonly into: string;
+}
+
+/** A generated file, its path relative to `Origin.into`. */
+export interface File {
+	readonly path: string;
+	readonly source: string;
+}
+
 /**
- * Writes the Effect Schema module for a normalized protocol: one file named
- * after the C++ namespace, such as `protocol.ts`.
+ * Writes the Effect Schema modules for a normalized protocol, in a directory
+ * named after the C++ namespace, such as `protocol/`, and `generated.ts`, an
+ * index that re-exports what they declare.
  *
- * Each procedure gets a TypeScript namespace of its own name. In it, its
- * payload is `Request`, `RequestShape` the same without its checks, and its
- * success `Success`; `Path` lists where in a request an issue can be, `Issue`
- * is a problem there, and `InvalidRequest` holds them. `Failure` is
+ * Each procedure gets a TypeScript namespace of its own name, in a file of
+ * its own under its side, such as `protocol/cpp-side/custom-cat.ts`. In it,
+ * its payload is `Request`, `RequestShape` the same without its checks, and
+ * its success `Success`; `Path` lists where in a request an issue can be,
+ * `Issue` is a problem there, and `InvalidRequest` holds them. `Failure` is
  * `InvalidRequest` or one of its other errors, such as `IoFailed`, and
- * `Output` what it prints, the success tagged or a failure. Every
- * other definition only it uses keeps its own name. A definition more than
- * one procedure uses is declared once, before the namespaces, as are the
- * errors besides InvalidRequest.
+ * `Output` what it prints, the success tagged or a failure. Every other
+ * definition only it uses keeps its own name. The errors besides
+ * InvalidRequest are declared once, in `protocol/common/tagged-errors.ts`,
+ * and a definition more than one procedure uses in
+ * `protocol/common/definitions.ts`.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
  * declarations around them, which that engine cannot express: `TaggedError`
- * classes, struct and type pairs, and JSDoc from descriptions.
+ * classes and struct and type pairs.
  */
-export function emit(
-	protocol: Protocol,
-	header: readonly string[],
-): { readonly file: string; readonly source: string } {
+export function emit(protocol: Protocol, origin: Origin): readonly File[] {
 	const { namespace, procedures, definitions, errors } = protocol;
 	for (const { name } of errors) {
 		if ((roleNames as readonly string[]).includes(name)) {
@@ -68,33 +85,113 @@ export function emit(
 		(name) => shared.has(name),
 	);
 
-	const source = [
-		...header.map((line) => `// ${line}`),
-		"//",
-		...namespaceNote.map((line) => `// ${line}`),
-		"",
-		'import { Schema } from "effect";',
-		"",
-		...sharedNames.map((name) =>
-			declare(required(definitions, name), definitions),
-		),
-		...errors.map((error) => errorDeclaration(error, definitions)),
-		...uses.map(({ procedure, names }) =>
-			procedureNamespace(procedure, names, shared, protocol),
-		),
-	].join("\n");
-	return {
-		file: `${kebabCase(pascalCase(namespace || "protocol"))}.ts`,
-		source,
-	};
+	const directory = kebabCase(pascalCase(namespace || "protocol"));
+	const definitionsFile = `${directory}/common/definitions.ts`;
+	const errorsFile = `${directory}/common/tagged-errors.ts`;
+	const comment = [
+		"/*",
+		"Generated",
+		`- from: ${origin.from}`,
+		`- by: ${origin.by}`,
+		"*/",
+	];
+	/** A Markdown link to `target`, from the file at `path`. */
+	const link = (path: string, target: string) =>
+		`[${target}](${relative(dirname(join(origin.into, path)), target)})`;
+	/** The file at `path`, which imports `names` from where they're declared. */
+	const module = (
+		path: string,
+		imports: ReadonlyArray<
+			readonly [file: string, names: readonly string[]]
+		>,
+		body: readonly string[],
+	): File => ({
+		path,
+		source: [
+			...comment,
+			"",
+			'import { Schema } from "effect";',
+			...imports
+				.filter(([, names]) => names.length > 0)
+				.map(
+					([file, names]) =>
+						`import { ${names.join(", ")} } from "${relativeImport(path, file)}";`,
+				),
+			"",
+			...body,
+		].join("\n"),
+	});
+	const sharedIn = (names: readonly string[]) =>
+		sharedNames.filter((name) => names.includes(name));
+
+	const files: File[] = [];
+	const exports: Array<readonly [file: string, names: readonly string[]]> =
+		[];
+	if (sharedNames.length > 0) {
+		files.push(
+			module(
+				definitionsFile,
+				[],
+				sharedNames.map((name) =>
+					declare(required(definitions, name), definitions),
+				),
+			),
+		);
+		exports.push([definitionsFile, sharedNames]);
+	}
+	if (errors.length > 0) {
+		const names = errors.map(({ name }) => name);
+		files.push(
+			module(
+				errorsFile,
+				[
+					[
+						definitionsFile,
+						sharedIn(errors.flatMap((error) => refsOf(error))),
+					],
+				],
+				errors.map((error) => errorDeclaration(error, definitions)),
+			),
+		);
+		exports.push([errorsFile, names]);
+	}
+	for (const { procedure, names } of uses) {
+		const path = `${directory}/${kebabCase(procedure.side)}/${kebabCase(procedure.name)}.ts`;
+		files.push(
+			module(
+				path,
+				[
+					[definitionsFile, sharedIn(names)],
+					[errorsFile, procedure.errors],
+				],
+				[
+					`/** Generated from ${link(path, origin.from)} by ${link(path, origin.by)}. */`,
+					procedureNamespace(procedure, names, shared, protocol),
+				],
+			),
+		);
+		exports.push([path, [procedure.name]]);
+	}
+	files.push({
+		path: "generated.ts",
+		source: [
+			...comment,
+			"",
+			...exports.map(
+				([file, names]) =>
+					`export { ${names.join(", ")} } from "${relativeImport("generated.ts", file)}";`,
+			),
+			"",
+		].join("\n"),
+	});
+	return files;
 }
 
-const namespaceNote = [
-	"A namespace per method makes `CustomCat.Success` both the schema and its",
-	"type, and TypeScript 7 hovers read `CustomCat.Success`. Namespaces are",
-	"TypeScript-only syntax that emits code, which Bun and Vite both compile.",
-	"What more than one method uses is declared once, before the namespaces.",
-];
+/** How the file at `from` imports the one at `to`, both under the same root. */
+function relativeImport(from: string, to: string): string {
+	const path = relative(dirname(from), to);
+	return path.startsWith(".") ? path : `./${path}`;
+}
 
 /** The names a procedure's namespace declares itself. */
 const roleNames = [
@@ -138,15 +235,8 @@ function procedureNamespace(
 			}
 		}
 	}
-	const roles = new Map<string, readonly [string, string]>([
-		[payload, ["Request", `What ${procedure.name} takes.`]],
-	]);
-	if (success !== payload) {
-		roles.set(success, [
-			"Success",
-			`What ${procedure.name} succeeds with.`,
-		]);
-	}
+	const roles = new Map([[payload, "Request"]]);
+	if (success !== payload) roles.set(success, "Success");
 	const declarations = names
 		.filter((name) => !shared.has(name))
 		.map((name) =>
@@ -155,7 +245,6 @@ function procedureNamespace(
 	const sameStruct =
 		success === payload
 			? [
-					`/** What ${procedure.name} succeeds with, the same struct it takes. */`,
 					"export const Success = Request;",
 					"export interface Success extends Request {}",
 					"",
@@ -166,15 +255,13 @@ function procedureNamespace(
 	// would inline forever.
 	const path = pathDeclaration(procedure, definitions);
 	return [
-		`/** What the ${procedure.name} method takes, succeeds with and fails with. */`,
 		`export namespace ${procedure.name} {`,
 		...declarations,
 		shapeDeclaration(procedure, definitions),
 		...sameStruct,
 		path,
-		issueDeclaration(procedure, protocol.issue),
-		invalidRequestDeclaration(procedure, protocol.invalidRequest),
-		`/** What ${procedure.name} fails with. */`,
+		issueDeclaration,
+		invalidRequestDeclaration,
 		...(procedure.errors.length === 0
 			? [
 					"export const Failure = InvalidRequest;",
@@ -185,7 +272,6 @@ function procedureNamespace(
 					`export type Failure = InvalidRequest | ${procedure.errors.join(" | ")};`,
 				]),
 		"",
-		`/** What ${procedure.name} prints: its success, tagged ${JSON.stringify(procedure.successTag)}, or what it fails with. */`,
 		`export const Output = Schema.Union([Schema.TaggedStruct(${JSON.stringify(procedure.successTag)}, Success.fields), ${["InvalidRequest", ...procedure.errors].join(", ")}]);`,
 		"export type Output = typeof Output.Type;",
 		"}",
@@ -208,7 +294,6 @@ function errorDeclaration(
 		definitions,
 	);
 	return [
-		"/** An error that isn't about a field. */",
 		`export class ${name} extends Schema.TaggedError<${name}>()(${JSON.stringify(tag)}, {`,
 		...fields,
 		"}) {}",
@@ -286,62 +371,43 @@ function pathDeclaration(
 				.join(", ")}])`,
 	);
 	return [
-		`/** Where in a ${procedure.name} request an issue is: a field, or [] for the whole request. */`,
 		`export const Path = Schema.Union([${tuples.join(", ")}]);`,
 		"export type Path = typeof Path.Type;",
 		"",
 	].join("\n");
 }
 
-function issueDeclaration(procedure: Procedure, issue: Definition): string {
-	const field = (name: string, code: string) => [
-		...docOf(issue, name),
-		`${name}: ${code},`,
-	];
-	return [
-		`/** A problem with a ${procedure.name} request. */`,
-		"export const Issue = Schema.Struct({",
-		...field("message", "Schema.String"),
-		...field("path", "Path"),
-		"});",
-		"export interface Issue extends Schema.Schema.Type<typeof Issue> {}",
-		"",
-	].join("\n");
-}
+/** A procedure's Issue: Path is its own, so the struct is too. */
+const issueDeclaration = [
+	"export const Issue = Schema.Struct({",
+	"message: Schema.String,",
+	"path: Path,",
+	"});",
+	"export interface Issue extends Schema.Schema.Type<typeof Issue> {}",
+	"",
+].join("\n");
 
-function invalidRequestDeclaration(
-	procedure: Procedure,
-	invalidRequest: Definition,
-): string {
-	return [
-		`/** What is wrong with a ${procedure.name} request's fields. */`,
-		'export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {',
-		...docOf(invalidRequest, "issues"),
-		"issues: Schema.NonEmptyArray(Issue),",
-		"}) {",
-		// A getter, not a field: the message never crosses the wire, and
-		// every decoded instance still has it.
-		"override get message(): string {",
-		'return this.issues.map((issue) => issue.message).join("; ");',
-		"}",
-		"}",
-		"",
-	].join("\n");
-}
-
-function docOf(definition: Definition, field: string): string[] {
-	const doc = definition.docs.get(field);
-	return doc === undefined ? [] : jsDoc(doc);
-}
+const invalidRequestDeclaration = [
+	'export class InvalidRequest extends Schema.TaggedError<InvalidRequest>()("InvalidRequest", {',
+	"issues: Schema.NonEmptyArray(Issue),",
+	"}) {",
+	// A getter, not a field: the message never crosses the wire, and every
+	// decoded instance still has it.
+	"override get message(): string {",
+	'return this.issues.map((issue) => issue.message).join("; ");',
+	"}",
+	"}",
+	"",
+].join("\n");
 
 /**
  * Declares a definition under its own name, or, when `role` is set, under
- * the name its procedure's namespace gives it, such as `Request`, with JSDoc.
+ * the name its procedure's namespace gives it, such as `Request`.
  */
 function declare(
 	definition: Definition,
 	definitions: ReadonlyMap<string, Definition>,
-	role?: readonly [name: string, doc: string],
+	role?: string,
 ): string {
 	if (definition.tag !== undefined) {
 		throw new Error(
@@ -349,9 +415,8 @@ function declare(
 		);
 	}
 	const fields = fieldsOf(definition, definitions);
-	const [name, doc] = role ?? [definition.name];
+	const name = role ?? definition.name;
 	return [
-		...(doc === undefined ? [] : [`/** ${doc} */`]),
 		`export const ${name} = Schema.Struct({`,
 		...fields,
 		"});",
@@ -381,7 +446,6 @@ function fieldsOf(
 				)
 			: fieldCode(schema, definitions);
 		return [
-			...docOf(definition, field),
 			`${field}: ${required.has(field) ? code : `Schema.optionalKey(${code})`},`,
 		];
 	});
@@ -404,7 +468,9 @@ function fieldCode(
 	);
 	const code = SchemaRepresentation.toCodeDocument(
 		SchemaRepresentation.toMultiDocument(
-			SchemaRepresentation.toRepresentation(imported.ast),
+			withoutExpected(
+				SchemaRepresentation.toRepresentation(imported.ast),
+			),
 		),
 	);
 	if (code.artifacts.length > 0) {
@@ -412,12 +478,32 @@ function fieldCode(
 	}
 	const [root] = code.codes;
 	if (root === undefined) throw new Error("The engine emitted no code");
-	return mergeChecks(
-		root.runtime.replaceAll(
-			'Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))',
-			"Schema.Int",
-		),
-	);
+	return mergeChecks(root.runtime);
+}
+
+/**
+ * Drops each check's `expected`, which the engine writes out as
+ * `.annotate({ expected })` though it's the check's own default: the
+ * importer ignores a JSON Schema's `expected`, so a check has no other.
+ */
+function withoutExpected<T>(representation: T): T {
+	const strip = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(strip);
+		if (typeof value !== "object" || value === null) return value;
+		const entries = Object.entries(value).map(
+			([key, item]) => [key, strip(item)] as const,
+		);
+		const node = Object.fromEntries(entries) as Record<string, unknown>;
+		const annotations = node.annotations as
+			| Record<string, unknown>
+			| undefined;
+		if (node._tag === "Filter" && annotations !== undefined) {
+			const { expected: _, ...rest } = annotations;
+			node.annotations = rest;
+		}
+		return node;
+	};
+	return strip(representation) as T;
 }
 
 /**
@@ -429,7 +515,6 @@ function shapeDeclaration(
 	definitions: ReadonlyMap<string, Definition>,
 ): string {
 	return [
-		`/** What ${procedure.name} takes, its fields' types without their rules. */`,
 		"export const RequestShape = Schema.Struct({",
 		...fieldsOf(
 			required(definitions, procedure.payload),
@@ -545,27 +630,6 @@ function required(
 	const definition = definitions.get(name);
 	if (definition === undefined) throw new Error(`No definition ${name}`);
 	return definition;
-}
-
-function jsDoc(text: string): string[] {
-	const lines = wrap(text.replaceAll("*/", "*\\/"), 72);
-	return lines.length === 1
-		? [`/** ${lines[0]} */`]
-		: ["/**", ...lines.map((line) => ` * ${line}`), " */"];
-}
-
-function wrap(text: string, width: number): string[] {
-	const lines: string[] = [];
-	let line = "";
-	for (const word of text.split(/\s+/)) {
-		if (line !== "" && line.length + word.length + 1 > width) {
-			lines.push(line);
-			line = word;
-		} else {
-			line = line === "" ? word : `${line} ${word}`;
-		}
-	}
-	return [...lines, line];
 }
 
 /** `AB` → `a-b`. */

@@ -2,13 +2,14 @@
 
 // What the C++ and TypeScript sides share. Edit it and run
 // `bun run generate`, which writes `cpp/protocol.schema.json` and
-// `src/shared/generated/protocol.ts`.
+// `src/shared/generated/`.
 //
-// - `Procedures` lists the procedures. A procedure's `payload` becomes
-//   `Request` in a TypeScript namespace named after it, and its `output`,
+// - `Procedures` lists the procedures, by the side that serves them. A
+//   procedure's `payload` becomes `Request` in a TypeScript namespace named
+//   after it, in a file of its own, and its `output`,
 //   what it prints, `Output`: a tagged union of its success, which becomes
 //   `Success`, InvalidRequest, then any error that isn't about a field.
-// - A field's `rfl::Description` becomes its JSDoc.
+// - A field's `rfl::Description` is in the JSON Schema, not the generated TS.
 // - A request's field carries its rules in its type, an rfl::Validator of
 //   Checks<…>. reflect-cpp reads a request with them, and each failure it
 //   reports, rfl::Error::details(), becomes an Issue (see issues()).
@@ -296,6 +297,32 @@ struct CustomCat {
 	CustomCatOutput output;
 };
 
-using Procedures = std::tuple<CustomCat>;
+struct ReadFileRequest {
+	rfl::Description<"The file to read, such as \"hello.txt\", in the files "
+					 "directory.",
+					 Existing>
+		name;
+};
+
+struct ReadFileSuccess {
+	using Tag = rfl::Literal<"Success">;
+	rfl::Description<"The whole file, decoded as UTF-8.", std::string> contents;
+};
+
+using ReadFileOutput =
+	rfl::TaggedUnion<"_tag", ReadFileSuccess, InvalidRequest, IoFailed>;
+
+struct ReadFile {
+	ReadFileRequest payload;
+	ReadFileOutput output;
+};
+
+// Every procedure, by the side that serves it: the BFF serves ReadFile
+// itself, and custom_cat CustomCat. Each field is a directory of the
+// generated TS, such as protocol/cpp-side/custom-cat.ts.
+struct Procedures {
+	std::tuple<ReadFile> bun_side;
+	std::tuple<CustomCat> cpp_side;
+};
 
 }  // namespace protocol

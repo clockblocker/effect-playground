@@ -35,9 +35,9 @@ Who checks the rules depends on the method:
   breaks one. The BFF checks a copy's shape only and leaves the rules to
   `custom_cat`, so every issue a copy comes back with is `custom_cat`'s,
   word for word.
-- `ReadFile` is the BFF's own, with no C++ step: its schema is written in
-  TypeScript, in `src/shared/read-file.ts`, and `BffReader` checks the name
-  with it, then the files.
+- `ReadFile`'s rules live on C++ types too, and its schema is generated
+  the same way, but the BFF serves it itself, with no C++ step:
+  `BffReader` checks the name with the generated schema, then the files.
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
 RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
@@ -74,7 +74,7 @@ error channel), a `Die` (a defect) or an `Interrupt`.
   the signal's when it's killed,
   `Process interrupted due to receipt of signal: 'SIGKILL'`, and
   `custom_cat timed out after 5000 ms` after five seconds, by default. Only
-  the BFF sees it, so it's declared in TS, in `src/shared/cli-failed.ts`.
+  the BFF sees it, so it's declared in TS, in `src/shared/helpers/cli-failed.ts`.
 - `ContractMismatch` is the BFF and `custom_cat` disagreeing: output that
   doesn't decode, such as an issue at a path no request has (an unknown
   flag: the BFF built the flags), output whose tag isn't its exit code's, or
@@ -224,9 +224,11 @@ at shell scripts.
 
 ## The protocol
 
-The C++ structs in `cpp/include/protocol.hpp` define `CustomCat`'s request
-and output, which `custom_cat` takes and prints. `Procedures` lists the
-procedures, `CustomCat` alone. A procedure's `output` is a tagged union of
+The C++ structs in `cpp/include/protocol.hpp` define each procedure's
+request and output. `Procedures` lists them, `ReadFile` and `CustomCat`.
+`custom_cat` takes `CustomCat`'s request and prints its output; no
+executable serves `ReadFile`, which the BFF does itself, so it uses its
+request, success and failure, and not its `Output`. A procedure's `output` is a tagged union of
 its success, whose `using Tag = rfl::Literal<"Success">` names it,
 `InvalidRequest`, a list of `Issue`s, which are structs there too, and
 `IoFailed`, whose one field is its `message`. Fields are snake_case in C++ and
@@ -303,9 +305,12 @@ array's indexes as numbers.
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
    keyword: `CodePoints` `minLength` or `maxLength`, a `PatternValidator` a
    `pattern`; `NotALink` and `ExistingFile` have none.
-2. `scripts/generate.ts` turns that into Effect Schema in one module,
-   `src/shared/generated/protocol.ts`: a TypeScript namespace per method,
-   named after it, `CustomCat`. In it, `Request` is the payload, `Success`
+2. `scripts/generate.ts` turns that into Effect Schema, a module per
+   procedure under the side that serves it, the field of `Procedures` it's
+   in: `src/shared/generated/protocol/bun-side/read-file.ts` and
+   `protocol/cpp-side/custom-cat.ts`, each a TypeScript namespace named
+   after it, `CustomCat`. `src/shared/generated/generated.ts` re-exports
+   them, and what they share, and everything imports from it. In it, `Request` is the payload, `Success`
    the output's first alternative without its tag, `Output` the whole union,
    with the success tagged, and `RequestShape` is `Request` without its
    checks, nested structs inlined. Each keyword becomes Effect's check, with
@@ -317,17 +322,16 @@ array's indexes as numbers.
    `Schema.TaggedError` with a non-empty `issues`, whose `message` joins
    theirs. `Failure` is `InvalidRequest` or `IoFailed` (`Failure`, because
    an `Error` there would shadow the global one). `IoFailed` is declared
-   once, before the namespaces, a `Schema.TaggedError` of its fields, whose
+   once, in `protocol/common/tagged-errors.ts`, a `Schema.TaggedError` of
+   its fields, whose
    `message` field is its message. Each name is both the schema and its type, so
    `CustomCat.Success` works in either position, and TypeScript 7 hovers read
    `CustomCat.Success`.
 3. The page's copy form validates with `CustomCat.Request`; the RPC payload,
    the REST body and the MCP tool's parameters are `CustomCat.RequestShape`.
 
-`ReadFile` is written by hand in `src/shared/read-file.ts`, in the same
-shape: a namespace with `Request`, whose name has the same rules as a copy's
-names, `RequestShape`, `Success`, `Path`, `Issue`, `InvalidRequest` and
-`Failure`, which reuses the generated `IoFailed`. The page's read form
+`ReadFile`'s name is `Existing`, as a copy's input is, so it has the same
+rules, and only the ones with a schema reach TypeScript. The page's read form
 validates with `ReadFile.Request`, and the RPC payload and REST `:name` are
 its `RequestShape`. `BffReader` decodes the name with
 `ReadFile.Request.fields.name`, and a name it rejects is an issue with the
@@ -338,7 +342,7 @@ and a file that doesn't exist with the system's message,
 `no such file or directory`. `src/shared/rest-api.ts` gives
 `InvalidRequest` 422 and `IoFailed` 500.
 
-`fieldOf(path)` (`src/shared/field-of.ts`) turns either method's path into
+`fieldOf(path)` (`src/shared/helpers/field-of.ts`) turns either method's path into
 react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
 `"inputFile"`, a path `["files", number, "input"]` is
 `` `files.${number}.input` ``.
@@ -371,8 +375,8 @@ type tests, which `bun run check` runs.
 - `cpp/` holds the protocol's structs and their validators, `custom_cat`
   and the tool that emits the schema. `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import: the REST API
-  (`BffApi`), the RPC group (`BffRpcs`), `CliFailed`, `ReadFile`, `fieldOf`,
-  and the generated protocol.
+  (`BffApi`), the RPC group (`BffRpcs`), `CliFailed`, `fieldOf`, and the
+  generated protocol, `ReadFile` and `CustomCat`.
 - `src/server/` is the BFF: `bun-side/` holds `BffReader`, `cpp-side/`
   `CustomCatCli`, and `protocols/` the three transports, which `main.ts`
   mounts on one router.

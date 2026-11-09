@@ -11,8 +11,8 @@ import {
 	Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { CustomCat } from "../../shared/generated/generated.ts";
 import { CliFailed } from "../../shared/helpers/cli-failed.ts";
-import { CustomCat } from "../../shared/generated/protocol.ts";
 
 const root = join(import.meta.dirname, "../../..");
 

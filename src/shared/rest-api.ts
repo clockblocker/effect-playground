@@ -6,10 +6,9 @@ import {
 	HttpApiMiddleware,
 	HttpApiSchema,
 } from "effect/http-api";
-import { CustomCat, IoFailed } from "./generated/protocol.ts";
+import { CustomCat, IoFailed, ReadFile } from "./generated/generated.ts";
 import { CliFailed } from "./helpers/cli-failed.ts";
 import { withStatus } from "./helpers/with-status.ts";
-import { ReadFile } from "./read-file.ts";
 
 const readFileInvalid = ReadFile.InvalidRequest.pipe(withStatus(422));
 const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));

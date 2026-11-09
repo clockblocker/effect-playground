@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
 import type { StandardSchema } from "effect";
+import type { CustomCat, ReadFile } from "../src/shared/generated/generated.ts";
 import { type FieldOf, fieldOf } from "../src/shared/helpers/field-of.ts";
-import type { CustomCat } from "../src/shared/generated/protocol.ts";
-import type { ReadFile } from "../src/shared/read-file.ts";
 
 // Checked by `bun run check`; the test only keeps bun test from skipping the file.
 type Equals<A, B> =

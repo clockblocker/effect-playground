@@ -10,8 +10,7 @@ import {
 	type PlatformError,
 	Schema,
 } from "effect";
-import { IoFailed } from "../../shared/generated/protocol.ts";
-import { ReadFile } from "../../shared/read-file.ts";
+import { IoFailed, ReadFile } from "../../shared/generated/generated.ts";
 
 const invalidName = (message: string) =>
 	new ReadFile.InvalidRequest({ issues: [{ message, path: ["name"] }] });

@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/protocol/emit.ts";
 import { normalize } from "../scripts/protocol/normalize.ts";
+import {
+	CustomCat,
+	IoFailed,
+	ReadFile,
+} from "../src/shared/generated/generated.ts";
 import { fieldOf } from "../src/shared/helpers/field-of.ts";
-import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
-import { ReadFile } from "../src/shared/read-file.ts";
 
 // The JSON forms both sides agree on.
 const wire = {
@@ -229,10 +232,19 @@ function fixture() {
 		required: ["payload", "output"],
 	});
 	return {
-		type: "array",
-		prefixItems: [{ $ref: "#/$defs/a__b__Get" }],
-		items: false,
+		$ref: "#/$defs/a__b__Procedures",
 		$defs: {
+			a__b__Procedures: {
+				type: "object",
+				properties: {
+					oneSide: {
+						type: "array",
+						prefixItems: [{ $ref: "#/$defs/a__b__Get" }],
+						items: false,
+					},
+				},
+				required: ["oneSide"],
+			},
 			a__b__Get: method("b__Query", "b__Found"),
 			a__b__Query: {
 				type: "object",
@@ -306,9 +318,26 @@ function fixture() {
 	};
 }
 
-/** The module the emitter writes. */
+/** The files the emitter writes, by path. */
+const emittedFiles = (document: unknown) =>
+	new Map(
+		emit(normalize(document), {
+			from: "a.hpp",
+			by: "gen.ts",
+			into: "out",
+		}).map(({ path, source }) => [path, source]),
+	);
+
+/** The one file the emitter writes at `path`. */
+const emittedFile = (document: unknown, path: string) => {
+	const source = emittedFiles(document).get(path);
+	if (source === undefined) throw new Error(`No file ${path}`);
+	return source;
+};
+
+/** Every file the emitter writes, one after another. */
 const emitted = (document: unknown) =>
-	emit(normalize(document), ["header"]).source;
+	[...emittedFiles(document).values()].join("\n");
 
 // Under node_modules, so that the module finds effect.
 mkdirSync(join(import.meta.dir, "../node_modules/.cache"), { recursive: true });
@@ -317,18 +346,46 @@ const scratch = mkdtempSync(
 );
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/** Imports what the emitter writes for `document`. */
+/** Imports the index the emitter writes for `document`. */
 async function load(document: unknown) {
-	const path = join(scratch, `${crypto.randomUUID()}.ts`);
-	await Bun.write(path, emitted(document));
-	return import(path);
+	const directory = join(scratch, crypto.randomUUID());
+	for (const [path, source] of emittedFiles(document)) {
+		await Bun.write(join(directory, path), source);
+	}
+	return import(join(directory, "generated.ts"));
 }
 
 describe("emitter", () => {
-	test("writes one module, with a namespace per method", () => {
-		const { file, source } = emit(normalize(fixture()), ["header"]);
-		expect(file).toBe("a-b.ts");
-		expect(source).toStartWith("// header\n");
+	test("writes a module per method under its side, and an index of them", () => {
+		const files = emittedFiles(fixture());
+		expect([...files.keys()]).toEqual([
+			"a-b/common/tagged-errors.ts",
+			"a-b/one-side/get.ts",
+			"generated.ts",
+		]);
+		expect(files.get("generated.ts")).toBe(
+			[
+				"/*",
+				"Generated",
+				"- from: a.hpp",
+				"- by: gen.ts",
+				"*/",
+				"",
+				'export { Busy } from "./a-b/common/tagged-errors.ts";',
+				'export { Get } from "./a-b/one-side/get.ts";',
+				"",
+			].join("\n"),
+		);
+		const source = emittedFile(fixture(), "a-b/one-side/get.ts");
+		expect(source).toStartWith(
+			"/*\nGenerated\n- from: a.hpp\n- by: gen.ts\n*/\n",
+		);
+		expect(source).toContain(
+			"/** Generated from [a.hpp](../../../a.hpp) by [gen.ts](../../../gen.ts). */\nexport namespace Get {",
+		);
+		expect(source).toContain(
+			'import { Busy } from "../common/tagged-errors.ts";',
+		);
 		expect(source).toContain("export namespace Get {");
 		expect(source).toContain("export const Request = Schema.Struct({");
 		expect(source).toContain(
@@ -338,7 +395,11 @@ describe("emitter", () => {
 		expect(source).toContain(
 			"export const Failure = Schema.Union([InvalidRequest, Busy]);\nexport type Failure = InvalidRequest | Busy;",
 		);
-		expect(source).toContain("/** What the batch is called. */");
+		expect(emitted(fixture())).not.toContain("What the batch is called.");
+		// The header, and a link to the source on each namespace.
+		expect(emitted(fixture()).match(/\/[*/]/g)).toHaveLength(
+			emittedFiles(fixture()).size + 1,
+		);
 		expect(source).toContain("limit: Schema.optionalKey(Schema.Int),");
 		expect(source).not.toContain("__");
 		expect(source).not.toMatch(/\bas (Request|Success|Failure|Error)\b/);
@@ -346,8 +407,7 @@ describe("emitter", () => {
 	});
 
 	test("lists a path per field, through arrays by index", async () => {
-		const { source } = emit(normalize(fixture()), ["header"]);
-		expect(source).toContain(
+		expect(emitted(fixture())).toContain(
 			'export const Path = Schema.Union([Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("input")]), Schema.Tuple([Schema.Literal("files"), Schema.Int, Schema.Literal("output")]), Schema.Tuple([Schema.Literal("label")]), Schema.Tuple([Schema.Literal("limit")]), Schema.Tuple([])]);',
 		);
 		const { Get } = await load(fixture());
@@ -381,6 +441,8 @@ describe("emitter", () => {
 
 	test("leaves each check Effect's own message", async () => {
 		expect(emitted(fixture())).not.toContain("{ message:");
+		// Nor the engine's .annotate({ expected }), each check's own default.
+		expect(emitted(fixture())).not.toContain(".annotate(");
 		const { Get } = await load(fixture());
 		const decode = Schema.decodeUnknownSync(Get.Request);
 		expect(() => decode({ files: [], label: "a" })).toThrow(
@@ -419,10 +481,9 @@ describe("emitter", () => {
 	});
 
 	test("declares each other error once, a field message its message", async () => {
-		const source = emitted(fixture());
-		expect(source.match(/export class Busy /g)).toHaveLength(1);
-		expect(source.indexOf("export class Busy ")).toBeLessThan(
-			source.indexOf("export namespace"),
+		expect(emitted(fixture()).match(/export class Busy /g)).toHaveLength(1);
+		expect(emittedFile(fixture(), "a-b/common/tagged-errors.ts")).toContain(
+			"export class Busy ",
 		);
 		const { Busy, Get } = await load(fixture());
 		const busy = Schema.decodeUnknownSync(Get.Failure)({
@@ -510,7 +571,14 @@ describe("emitter", () => {
 describe("emitter, for methods that share a struct", () => {
 	const shared = () => {
 		const document = fixture();
-		document.prefixItems.push({ $ref: "#/$defs/a__b__Put" });
+		const procedures = document.$defs.a__b__Procedures as {
+			properties: Record<string, unknown>;
+		};
+		procedures.properties.otherSide = {
+			type: "array",
+			prefixItems: [{ $ref: "#/$defs/a__b__Put" }],
+			items: false,
+		};
 		const get = document.$defs.a__b__Get?.properties as {
 			output: { anyOf: object[] };
 		};
@@ -542,11 +610,21 @@ describe("emitter, for methods that share a struct", () => {
 		return document;
 	};
 
-	test("declares it once, before the namespaces", () => {
-		const source = emitted(shared());
-		expect(source.match(/export const Pair = /g)).toHaveLength(1);
-		expect(source.indexOf("export const Pair = ")).toBeLessThan(
-			source.indexOf("export namespace"),
+	test("declares it once, in common/, which each method imports", () => {
+		const files = emittedFiles(shared());
+		expect(emitted(shared()).match(/export const Pair = /g)).toHaveLength(
+			1,
+		);
+		expect(files.get("a-b/common/definitions.ts")).toContain(
+			"export const Pair = ",
+		);
+		for (const path of ["a-b/one-side/get.ts", "a-b/other-side/put.ts"]) {
+			expect(files.get(path)).toContain(
+				'import { Pair } from "../common/definitions.ts";',
+			);
+		}
+		expect(files.get("generated.ts")).toContain(
+			'export { Pair } from "./a-b/common/definitions.ts";',
 		);
 	});
 

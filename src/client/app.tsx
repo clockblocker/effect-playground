@@ -1,5 +1,4 @@
-import { CustomCat } from "../shared/generated/protocol.ts";
-import { ReadFile } from "../shared/read-file.ts";
+import { CustomCat, ReadFile } from "../shared/generated/generated.ts";
 import { ReadFileForm } from "./forms/read-file.tsx";
 import { RunCliForm } from "./forms/run-cli.tsx";
 

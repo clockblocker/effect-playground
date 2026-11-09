@@ -5,8 +5,6 @@ export interface Definition {
 	readonly name: string;
 	/** The JSON Schema, with `$ref`s renamed, descriptions removed and objects closed. */
 	readonly schema: JsonSchema.JsonSchema;
-	/** Field name → the field's `rfl::Description`. */
-	readonly docs: ReadonlyMap<string, string>;
 	/** Set when the struct is an alternative of an `rfl::TaggedUnion<"_tag", …>`. */
 	readonly tag: string | undefined;
 }
@@ -14,6 +12,8 @@ export interface Definition {
 /** A procedure struct, never sent, naming what it takes and prints. */
 export interface Procedure {
 	readonly name: string;
+	/** The field of `Procedures` it's in, the side that serves it, such as `cppSide`. */
+	readonly side: string;
 	readonly payload: string;
 	/** The output's first alternative, without its tag. */
 	readonly success: string;
@@ -46,8 +46,9 @@ const taggedSuffix = "__tagged";
 const errorOwnFields = new Set(["name", "stack", "cause"]);
 
 /**
- * Reads the JSON Schema that reflect-cpp emits for a procedure struct, or
- * for a `std::tuple` of them, and undoes its encodings: `$defs` keys such as
+ * Reads the JSON Schema that reflect-cpp emits for `Procedures`, a struct
+ * whose every field is a side, a `std::tuple` of the procedure structs it
+ * serves, and undoes its encodings: `$defs` keys such as
  * `protocol__Issue` or `protocol__InvalidRequest__tagged` become C++ names,
  * and the `_tag` property of a tagged alternative becomes its tag. Fails on
  * any shape the emitter does not support, rather than emitting something
@@ -57,23 +58,34 @@ export function normalize(document: unknown): Protocol {
 	if (!Predicate.isObject(document)) {
 		throw new Error("Expected a schema object");
 	}
-	const roots =
-		typeof document.$ref === "string"
-			? [document.$ref]
-			: Array.isArray(document.prefixItems)
-				? document.prefixItems.map((item) =>
+	const defs = Predicate.isObject(document.$defs) ? document.$defs : {};
+	const rootRef = document.$ref;
+	const root =
+		typeof rootRef === "string" && rootRef.startsWith(definitionRef)
+			? defs[rootRef.slice(definitionRef.length)]
+			: undefined;
+	const sides =
+		Predicate.isObject(root) && Predicate.isObject(root.properties)
+			? Object.entries(root.properties)
+			: [];
+	const roots = sides.flatMap(([side, tuple]) =>
+		Predicate.isObject(tuple) && Array.isArray(tuple.prefixItems)
+			? tuple.prefixItems.map((item) => ({
+					side,
+					ref:
 						Predicate.isObject(item) &&
 						typeof item.$ref === "string"
 							? item.$ref
 							: "",
-					)
-				: [];
-	if (roots.length === 0 || roots.includes("")) {
+				}))
+			: [{ side, ref: "" }],
+	);
+	if (roots.length === 0 || roots.some(({ ref }) => ref === "")) {
 		throw new Error(
-			"Expected a schema whose root is a $ref into $defs, or a tuple of them",
+			"Expected a schema whose root is a struct of sides, each a tuple of procedure structs",
 		);
 	}
-	const defs = Predicate.isObject(document.$defs) ? document.$defs : {};
+	const rootName = (rootRef as string).slice(definitionRef.length);
 
 	const names = new Map<string, { name: string; namespace: string }>();
 	for (const key of Object.keys(defs)) {
@@ -97,14 +109,15 @@ export function normalize(document: unknown): Protocol {
 
 	const definitions = new Map<string, Definition>();
 	for (const [key, raw] of Object.entries(defs)) {
+		if (key === rootName) continue;
 		const { name } = names.get(key) ?? { name: key };
 		definitions.set(name, normalizeDefinition(name, raw, rename));
 	}
 
-	const procedures = roots.map((ref) => {
+	const procedures = roots.map(({ side, ref }) => {
 		const root = names.get(ref.slice(definitionRef.length));
-		if (root === undefined) throw new Error(`Unknown root ${ref}`);
-		return { ...root, ...procedure(root.name, definitions) };
+		if (root === undefined) throw new Error(`Unknown procedure ${ref}`);
+		return { ...root, side, ...procedure(root.name, definitions) };
 	});
 	const invalidRequest = required(definitions, "InvalidRequest");
 	const issue = required(definitions, "Issue");
@@ -173,7 +186,7 @@ function checkErrorFields(
 function procedure(
 	name: string,
 	definitions: ReadonlyMap<string, Definition>,
-): Omit<Procedure, "name"> {
+): Omit<Procedure, "name" | "side"> {
 	const schema = definitions.get(name)?.schema;
 	const field = (property: string) => {
 		const properties = Predicate.isObject(schema?.properties)
@@ -282,15 +295,13 @@ function normalizeDefinition(
 	) {
 		throw new Error(`${name} must be a struct`);
 	}
-	const docs = new Map<string, string>();
 	const properties: Record<string, JsonSchema.JsonSchema> = {};
 	const required = new Set(Array.isArray(raw.required) ? raw.required : []);
 	let tag: string | undefined;
 	for (const [field, schema] of Object.entries(raw.properties)) {
 		if (!Predicate.isObject(schema))
 			throw new Error(`${name}.${field} is not a schema`);
-		const { description, ...rest } = schema;
-		if (typeof description === "string") docs.set(field, description);
+		const { description: _, ...rest } = schema;
 		const rewritten = rewrite(rest, rename);
 		properties[field] = required.has(field)
 			? rewritten
@@ -300,7 +311,6 @@ function normalizeDefinition(
 	return {
 		name,
 		schema: { ...raw, properties, additionalProperties: false },
-		docs,
 		tag,
 	};
 }

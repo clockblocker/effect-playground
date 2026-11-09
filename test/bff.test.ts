@@ -15,8 +15,7 @@ import { buildCpp } from "../scripts/cpp.ts";
 import { BffReader } from "../src/server/bun-side/bff-reader.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { RestRoutes } from "../src/server/protocols/rest.ts";
-import { IoFailed } from "../src/shared/generated/protocol.ts";
-import { ReadFile } from "../src/shared/read-file.ts";
+import { IoFailed, ReadFile } from "../src/shared/generated/generated.ts";
 
 // Effect's own messages, for the rules ReadFile.Request checks.
 const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";

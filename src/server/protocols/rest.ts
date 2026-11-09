@@ -4,7 +4,7 @@ import {
 	type HttpApiError,
 	HttpApiMiddleware,
 } from "effect/http-api";
-import { CustomCat } from "../../shared/generated/protocol.ts";
+import { CustomCat } from "../../shared/generated/generated.ts";
 import { BffApi, CustomCatSchemaErrors } from "../../shared/rest-api.ts";
 import { BffReader } from "../bun-side/bff-reader.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";

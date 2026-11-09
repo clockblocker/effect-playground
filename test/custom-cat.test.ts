@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { buildCpp, customCatBinary } from "../scripts/cpp.ts";
-import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
+import { CustomCat, IoFailed } from "../src/shared/generated/generated.ts";
 
 // What the BFF decodes custom_cat's stdout with.
 const output = Schema.decodeUnknownSync(
