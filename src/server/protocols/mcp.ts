@@ -3,8 +3,7 @@ import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
 import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
 import { fieldOf } from "../../shared/helpers/field-of.ts";
 import { cppSideFailure } from "../../shared/helpers/tagged-errors.ts";
-import { CustomCatCli } from "../cpp-side/custom-cat.ts";
-import { CustomWcCli } from "../cpp-side/custom-wc.ts";
+import { Core } from "../cpp-side/core.ts";
 
 type Issues = ReadonlyArray<{
 	readonly path: ReadonlyArray<string | number>;
@@ -59,11 +58,18 @@ const Tools = Toolkit.make(CustomCatTool, CustomWcTool);
 
 const ToolHandlers = Tools.toLayer(
 	Effect.gen(function* () {
-		const customCat = yield* CustomCatCli;
-		const customWc = yield* CustomWcCli;
+		const core = yield* Core;
 		return Tools.of({
-			custom_cat: forTool(customCat.run, CustomCat.InvalidRequest),
-			custom_wc: forTool(customWc.run, CustomWc.InvalidRequest),
+			custom_cat: forTool(
+				(request: CustomCat.RequestShape) =>
+					core.call((operations) => operations.CustomCat(request)),
+				CustomCat.InvalidRequest,
+			),
+			custom_wc: forTool(
+				(request: CustomWc.RequestShape) =>
+					core.call((operations) => operations.CustomWc(request)),
+				CustomWc.InvalidRequest,
+			),
 		});
 	}),
 );

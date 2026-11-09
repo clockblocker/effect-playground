@@ -35,8 +35,8 @@ Who checks the rules depends on the operation:
   its own header in `cpp/include/protocol/`. The page's forms check them with
   the TypeScript schemas generated from them (see below), so they show
   Effect's own messages and send nothing that breaks one. The BFF checks a
-  request's shape only and leaves the rules to the executable, so every issue
-  a copy or a count comes back with is the C++'s, word for word.
+  request's shape only and leaves the rules to the core, so every issue a
+  copy or a count comes back with is the C++'s, word for word.
 - `ReadFile` and `SearchFile` are the BFF's own, with no C++ step: each's
   DTOs are written in TypeScript, beside the BFF service that serves it, in
   `src/server/bun-side/read-file/read-file-dtos.ts` and
@@ -45,10 +45,22 @@ Who checks the rules depends on the operation:
   generated schema, then the files; `SearchFileBff` checks a search's name and
   query, then reads with `ReadFileBff`.
 
-The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
-RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
-(`effect/ai`) whose two tools, `custom_cat` and `custom_wc`, run the C++
-executables of those names.
+Two processes run it, and the C++ one is the parent:
+
+```
+core                                   cpp/build/core: serves the C++ operations over JSON-RPC
+ ├─ watchdog                           a fork of the core that takes the BFF down if the core dies, SIGKILL included
+ └─ BFF                                bun src/server/main.ts, or dist/bff compiled; launched by the core
+```
+
+The **core** (`cpp/build/core`) serves `CustomCat` and `CustomWc` over
+JSON-RPC on 127.0.0.1, and launches the command after its `--`, the BFF,
+with the port in `EFFECT_PLAYGROUND_CORE_PORT`. The **BFF**
+(backend-for-frontend) is a Bun server; it serves the page, over RPC a
+client for it, a REST API (`effect/http-api`) for other clients, and an MCP
+server (`effect/ai`) whose two tools are `custom_cat` and `custom_wc`. It
+serves `ReadFile` and `SearchFile` itself, and calls the core for the
+others.
 
 ## What can go wrong
 
@@ -61,46 +73,40 @@ error channel), a `Die` (a defect) or an `Interrupt`.
 | Shape | a wrong type, a missing or unknown field | `Fail`, or `Die` on RPC | `InvalidRequest` |
 | Rule | a value breaks a rule on its own, or against another field | `Fail` | `InvalidRequest` |
 | Precondition | a value conflicts with the files: the input is missing, a name is a link, the output is the input | `Fail` | `InvalidRequest` |
-| Dependency | a file can't be read or written, or an executable can't run | `Fail` | `IoFailed`, `CliFailed` |
+| Dependency | a file can't be read or written, or the core can't be reached | `Fail` | `IoFailed`, `CoreUnavailable` |
 | Transport | the page can't reach the BFF | `Fail` | `RpcClientError` |
-| Contract | an executable's output doesn't match the protocol | `Die` | `ContractMismatch` |
+| Contract | the core's answer doesn't match the protocol | `Die` | a defect |
 | Defect | a bug | `Die` | anything |
 | Interruption | the call was abandoned | `Interrupt` | none |
 
 - `IoFailed` is a read or write that failed for a reason that isn't about a
   name, such as a directory named `x.txt` or a read-only `files/`:
-  `{ message }`, what the system said about the errno. The executables say
+  `{ message }`, what the system said about the errno. The core says
   `Is a directory` (`std::generic_category()`), and the BFF's reader
   `illegal operation on a directory` (`getSystemErrorMessage`). Each
   operation declares its own, as it does its `InvalidRequest`:
   `CustomCat.IoFailed` and `CustomWc.IoFailed` from C++, `ReadFile.IoFailed`
   in its DTOs.
-- `CliFailed` is the BFF failing to run an executable to its end:
-  `{ message }`. It's the spawner's own message when the executable doesn't
-  start, such as
-  `NotFound: ChildProcess.spawn (…/custom_cat --input-file=… --output-file=…)`,
-  the signal's when it's killed,
-  `Process interrupted due to receipt of signal: 'SIGKILL'`, and
-  `custom_cat timed out after 5000 ms` after five seconds, by default. Only
-  the BFF sees it, so it's declared in TS, in
+- `CoreUnavailable` is the BFF failing to get an answer from the core:
+  `{ message }`, such as
+  `The core at 127.0.0.1:61234 can't be reached: SocketOpenError: …`,
+  `The core at 127.0.0.1:61234 didn't answer in 5000 ms` after five
+  seconds, by default, or, when the BFF runs without the core,
+  `The BFF runs without the core, which launches it: bun run dev starts both`.
+  Only the BFF sees it, so it's declared in TS, in
   `src/shared/helpers/tagged-errors.ts`, which holds the BFF's own errors
   that cross the wire. An operation's errors are in its DTOs instead.
-- `ContractMismatch` is the BFF and an executable disagreeing: output that
-  doesn't decode, such as an issue at a path no request has (an unknown
-  flag: the BFF built the flags), output whose tag isn't its exit code's, or
-  an exit code the executables don't have.
-  It carries the exit code, stdout, stderr and the issue, and the BFF logs
-  it where it happens. It stays a defect: no caller can act on it.
-- A timeout is `CliFailed` to the caller; inside the runner it interrupts
-  the run, which kills the executable, as an abandoned call does.
+- An answer from the core that doesn't decode is the BFF and the core
+  disagreeing, and a defect, as is a defect the core answers with, such as a
+  method it doesn't have: no caller can act on either.
 
 Each hop on the way to the page adds its own errors to an operation's, and
 each has a name for the result:
 
 | Hop | Its failure | Adds |
 |---|---|---|
-| core, a C++ executable or the BFF's own code | `CustomCat.Failure`, generated | the operation's `InvalidRequest` and other errors, such as `IoFailed` |
-| the BFF, running a C++ operation | `CppSideFailure<CustomCat.Failure>`, and `cppSideFailure(CustomCat.Failure)` as a schema, in `src/shared/helpers/tagged-errors.ts` | `CliFailed` |
+| core, the C++ core or the BFF's own code | `CustomCat.Failure`, generated | the operation's `InvalidRequest` and other errors, such as `IoFailed` |
+| the BFF, calling the core | `CppSideFailure<CustomCat.Failure>`, and `cppSideFailure(CustomCat.Failure)` as a schema, in `src/shared/helpers/tagged-errors.ts` | `CoreUnavailable` |
 | the page, over RPC | `PageFailure<…>`, in `src/client/data-access/data-access.ts` | the transport's `RpcClientError` |
 
 The RPC group, the REST endpoints, the MCP tools and the CLI services all
@@ -117,23 +123,22 @@ How each surfaces:
 |---|---|---|---|
 | Shape | a raw request gets a `Die` | 422, the `InvalidRequest` as JSON | a tool error from McpServer: `Invalid parameters for tool 'custom_cat': …` |
 | Rule, Precondition | `InvalidRequest`: each issue under its field; the form shows a rule's issue in Effect's words and sends nothing | 422, the `InvalidRequest` as JSON | a tool error, a line per issue: `outputFile: Must not be the input file` |
-| Dependency | the error's `message` as the root message | 500 for an operation's error, such as `IoFailed`, 503 for `CliFailed`, as JSON | a tool error whose text is the `message` |
+| Dependency | the error's `message` as the root message | 500 for an operation's error, such as `IoFailed`, 503 for `CoreUnavailable`, as JSON | a tool error whose text is the `message` |
 | Transport | `Request failed: ` and its cause, such as `Transport error (POST …/rpc/)` | | |
 | Contract, Defect | `Something went wrong.` | an empty 500 | `Tool execution failed due to an internal server error.` |
 | Interruption | nothing | | |
 
-The BFF logs every defect: the CLI runner a `ContractMismatch`, the RPC
-handlers the rest, which RpcServer sends without logging, and HttpApi and
-McpServer their own.
+The BFF logs every defect: the RPC handlers theirs, which RpcServer sends
+without logging, and HttpApi and McpServer their own.
 
 Shape is a `Die` on RPC because `RpcServer` decodes the payload before any
 handler or middleware runs, and a payload that doesn't decode becomes a
 defect with the schema's message, with no hook to turn it into a typed
 error. So each method's payload schema is its `RequestShape`, the request's
 fields with their types and no rules: a payload that breaks a rule decodes,
-and the handler answers it with the method's `InvalidRequest`, the
-executable's for a copy or a count, and `ReadFileBff`'s or `SearchFileBff`'s for
-a read or a search. Only a payload of the wrong shape
+and the handler answers it with the method's `InvalidRequest`, the core's
+for a copy or a count, and `ReadFileBff`'s or `SearchFileBff`'s for a read or
+a search. Only a payload of the wrong shape
 dies, which the page's client never sends, since it encodes the payload
 with the same schema. The REST body and the MCP tool's parameters are
 `RequestShape`s too.
@@ -168,15 +173,28 @@ bun run dev
 ```
 
 Open <http://127.0.0.1:5200/>. `bun run dev` builds `cpp/` if needed, then
-runs the BFF as `bun --watch src/server/main.ts`. One Bun server serves it
-all on 5200: the page at `/`, which Bun bundles from `src/client/index.html`
-as it's requested and hot-reloads as `src/client` changes, the RPC at `/rpc`,
-the REST API at `http://127.0.0.1:5200/api/…` and the MCP server at
-`http://127.0.0.1:5200/mcp`. `EFFECT_PLAYGROUND_PORT` moves it.
-`bun run build` bundles the page into `dist/`.
+runs the core, which launches the BFF as `bun --watch src/server/main.ts`.
+One Bun server serves it all on 5200: the page at `/`, which Bun bundles
+from `src/client/index.html` as it's requested and hot-reloads as
+`src/client` changes, the RPC at `/rpc`, the REST API at
+`http://127.0.0.1:5200/api/…` and the MCP server at
+`http://127.0.0.1:5200/mcp`. `EFFECT_PLAYGROUND_PORT` moves it; the core
+takes an ephemeral port, or `EFFECT_PLAYGROUND_CORE_PORT`'s, and tells the
+BFF.
 
-Stop `bun run dev` with Ctrl-C. `bun run` doesn't forward SIGTERM to its
-child: `kill <pid of bun run dev>` leaves the BFF running.
+```sh
+bun run build   # builds cpp/, and compiles the BFF, page included, into dist/bff
+bun run start   # cpp/build/core -- dist/bff
+```
+
+`bun run build` makes two executables: the core, and the BFF compiled with
+`bun build --compile`, Bun and the page's bundle inside it. `bun run start`
+runs the core with it, from the directory whose `files/` they serve: both
+take `files/` under their working directory.
+
+Stop either with Ctrl-C: the core forwards SIGINT, SIGTERM and SIGHUP to the
+BFF and exits with its status, and if the core dies any other way, even
+SIGKILLed, its watchdog stops the BFF.
 
 What each transport serves:
 
@@ -214,25 +232,36 @@ curl http://127.0.0.1:5200/mcp \
 copies `files/hello.txt` to `files/copy.txt`, and its JSON-RPC `result` is
 `{"content":[{"type":"text","text":"{\"bytesCopied\":54}"}],"structuredContent":{"bytesCopied":54},"isError":false}`.
 
-## The C++ operations
-
-Each C++ operation is an executable in `cpp/build/`, working in `files/`
-under its working directory:
+## The core
 
 ```sh
-custom_cat --input-file=hello.txt --output-file=copy.txt
-custom_wc --file=hello.txt
+cpp/build/core -- bun --watch src/server/main.ts   # what bun run dev runs
+cpp/build/core                                     # serves alone, as the tests run it
 ```
+
+The core (`cpp/src/core.cpp`) serves the C++ operations over JSON-RPC on
+127.0.0.1, in `files/` under its working directory, and launches its
+command, if it has one, with the port in `EFFECT_PLAYGROUND_CORE_PORT`. It
+logs `core: serving over JSON-RPC on 127.0.0.1:PORT` on stderr.
 
 - `custom_cat` copies one `.txt` file to another, replacing the output if it
   exists. It writes a temporary file next to the output and renames it over
   the output, so a write that fails leaves the old output as it was, and
   removes the temporary file. One killed mid-copy can leave a
   `.custom_cat-…` file, which no request can name. Both names follow the
-  read's rules, and only the input must exist.
+  name rules, and only the input must exist.
 - `custom_wc` counts a `.txt` file's lines, words and bytes, as `wc` does: a
   line ends in a newline, and a word is a run of characters that aren't
-  whitespace. `{"_tag":"Success","lines":2,"words":7,"bytes":40}`.
+  whitespace.
+
+The core speaks Effect's own JSON-RPC dialect, `RpcSerialization.layerNdJsonRpc()`,
+one JSON value per line each way (`cpp/include/core/json_rpc.hpp` says
+how): a success is the response's `result`, such as
+`{"jsonrpc":"2.0","id":1,"result":{"lines":2,"words":7,"bytes":40}}`, and a
+failure its `error`, an encoded Effect `Cause` of the operation's
+`InvalidRequest` or `IoFailed`, so the BFF's `RpcClient` decodes it as
+the very error the core failed with. It answers Effect's pings, and treats
+each connection on its own thread.
 
 An operation is four files' worth of steps, each in its own place:
 
@@ -241,46 +270,38 @@ An operation is four files' worth of steps, each in its own place:
 | its contract: the request, its success, its output | `cpp/include/protocol/<operation>.hpp` | `CustomCatRequest`, `CustomCatSuccess`, `CustomCatOutput` |
 | the rules a field's type carries, which reach the TS form through the schema | `cpp/include/protocol/names.hpp` | both names are a `FileName` |
 | what only the files can say, and every touch of the disk | `cpp/include/files.hpp`, with its bodies in `cpp/src/files.cpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
-| its check and its work | `cpp/src/<operation>.cpp` | `check()`, `copy()` |
+| its check and its work | `cpp/include/operations/<operation>.hpp`, with its bodies in `cpp/src/operations/` | `custom_cat::check()`, `custom_cat::copy()` |
 
-and `main` is one call, `protocol::run<Output, Request>(argc, argv, check,
-copy)` (`cpp/include/run.hpp`), which runs the steps in order:
+and the core serves it with one line, in `cpp/src/core.cpp`:
 
-1. read: reflect-cpp reads the request from the flags, which its CLI reader
-   (`rfl/cli.hpp`) spells in kebab-case, with the rules its fields' types
-   carry, and reports every field that breaks one;
+```cpp
+operations.add<protocol::CustomCat>(custom_cat::check, custom_cat::copy);
+```
+
+under its procedure's name, `CustomCat`, as the generated `CoreRpcs` calls
+it. `core::Operations` (`cpp/include/core/operation.hpp`) runs it for a
+request in its steps:
+
+1. read: reflect-cpp reads the request from the request's params, with the
+   rules its fields' types carry, and reports every field that breaks one; a
+   missing field is an issue in its words, `Field named 'outputFile' not
+   found.`, and an unknown one an issue under its own name, `["verbose"]`,
+   which no `Path` has;
 2. check: the operation's `check`, a request → `rfl::Result` of it, asks
    what the types can't, such as the files, once every field passes its own
    rules, and puts each issue on its field;
 3. act: the operation's work, which may fail to read or write;
-4. print the output, and exit with its code, the same for every operation:
+4. answer: the success, or the `InvalidRequest` of what 1 or 2 found, or the
+   `IoFailed` of 3, as a failure. Anything else it throws, or a method it
+   doesn't have, is a defect.
 
-- 0: stdout is the success, such as `{"_tag":"Success","bytesCopied":18}`.
-- 1, the flags are wrong: stdout is the `InvalidRequest`, with every
-  issue, such as
-  `{"_tag":"InvalidRequest","issues":[{"message":"String 'config.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["inputFile"]},{"message":"String 'x.json' did not match format '.txt file name': '^.+\\.txt$'.","path":["outputFile"]}]}`.
-  A missing flag is an issue on its field, in reflect-cpp's words:
-  `Field named 'output-file' not found.`, and an unknown one an issue under
-  its own name, `["verbose"]`, which no `Path` has.
-- 3, a file couldn't be read or written: stdout is the `IoFailed`, such as
-  `{"_tag":"IoFailed","message":"Is a directory"}`.
-- 4, anything else, which would be a bug in the executable: on stderr.
-
-stdout, on 0, 1 and 3, is one of the operation's outputs, a tagged union
-declared in C++, such as `CustomCatOutput`, which is `CustomCat.Output` in
-TS: `Success`, `InvalidRequest` or `IoFailed`. The BFF runs each with one
-runner, `cliRunner` (`src/server/cpp-side/cli.ts`): the request's fields
-become its flags, `--input-file=…`, it runs in a scope whose end kills it
-(`SIGTERM`, then `SIGKILL` a second later), and its stdout is decoded once
-with the operation's `Output` and checked against `run.hpp`'s rule: exit 0
-prints the success, 1 the `InvalidRequest`, and 3 any other of its errors,
-whatever they are. A success comes back without its tag, and a failure
-fails. Exit 4 is a defect; any other code, output that doesn't decode, or a
-tag that doesn't go with its exit code is a `ContractMismatch`. Each operation's service is a few lines
-over it: `CustomCatCli` and `CustomWcCli`, whose
-`layerWith({ directory, binary, timeout })` sets where it runs, which
-executable it runs and how long it may take; the tests point `binary` at
-shell scripts.
+The BFF calls it through `Core` (`src/server/cpp-side/core.ts`), an Effect
+`RpcClient` of the generated `CoreRpcs` over a socket:
+`core.call((operations) => operations.CustomCat(request))` succeeds with
+the operation's success, fails with its own errors, and turns a transport
+failure, or a call it doesn't answer in five seconds, into
+`CoreUnavailable`. `Core.layer` connects to `EFFECT_PLAYGROUND_CORE_PORT`;
+`Core.connect(port, { timeout })` to any core, as the tests do.
 
 ## The protocol
 
@@ -404,11 +425,12 @@ src/shared/generated/
    paths, `{ message, path }`, `InvalidRequest`, a `Schema.TaggedError`
    with a non-empty `issues`, whose `message` joins theirs, `Failure`,
    `InvalidRequest` or one of `Errors` (`Failure`, because an `Error` there
-   would shadow the global one), and, for a C++ operation, `Output`, what it
-   prints, the success tagged. Each name is both the schema and its type, so
+   would shadow the global one). Each name is both the schema and its type, so
    `CustomCat.Success` works in either position, and TypeScript 7 hovers read
    `CustomCat.Success`. Each namespace links to its DTOs, which link to the
-   C++ header.
+   C++ header. `cpp-side/core-rpcs.ts` is `CoreRpcs`, an RPC per C++
+   operation, its payload the `RequestShape`, as the core checks the rules:
+   the RPC group the BFF calls the core with.
 4. The page's forms validate with each operation's `Request`; the RPC
    payloads, the REST bodies and the MCP tools' parameters are their
    `RequestShape`s.
@@ -431,7 +453,7 @@ or `errorsOf(cppSideFailure(Operation.Failure))` for a C++ operation, and
 each endpoint with a JSON body a middleware, one line with `SchemaErrorsOf`,
 both in `src/shared/helpers/rest-errors.ts`. Neither knows an operation's
 errors, only the hops': its `InvalidRequest` is 422, the client's fault,
-`CliFailed` 503, a service the BFF depends on failing, and any other of its
+`CoreUnavailable` 503, a service the BFF depends on failing, and any other of its
 errors 500, the server's. An endpoint's errors are its operation's, so an
 error an operation gains is on its endpoint too.
 
@@ -457,7 +479,7 @@ bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
 bun run deps             # dependency-cruiser: the generated protocol only through generated.ts
-bun run test             # builds the C++; runs the executables, the BFF and the forms' matching
+bun run test             # builds the C++; runs the core, the BFF, compiled too, and the forms' matching
 bun run generate:check
 ```
 
@@ -469,25 +491,26 @@ type tests, which `bun run check` runs.
 
 - `cpp/` holds headers in `include/` and their bodies in `src/`: a header
   declares, and its `.cpp` defines, except for types and templates, such as
-  `run()`, which every file that uses them must see. `include/protocol/` is
-  the protocol: a contract per operation, `names.hpp` and `wire.hpp`;
-  `include/files.hpp` is every touch of the disk, and `include/run.hpp` the
-  steps every executable runs. `src/` also holds each executable, its check
-  and its work, and the tool that emits the schema. CMake builds the bodies
-  once, as the `shared` library every executable links. `cpp/build/` is
+  `Operations::add`, which every file that uses them must see.
+  `include/protocol/` is the protocol: a contract per operation, `names.hpp`
+  and `wire.hpp`; `include/operations/` each operation's check and work;
+  `include/files.hpp` is every touch of the disk; and `include/core/` the
+  core's own parts: `Operations`, the JSON-RPC dialect, the TCP server and
+  the watchdog. `src/core.cpp` is the core's `main`, and
+  `src/protocol_schema.cpp` the tool that emits the schema. CMake builds the
+  bodies the two share once, as the `shared` library. `cpp/build/` is
   ignored.
 - `src/shared/` is the contract the page and the BFF import, all of it
   generated or built on what is: the generated protocol, the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and `helpers/`: `tagged-errors.ts`,
-  the BFF's own errors, `CliFailed`,
+  the BFF's own errors, `CoreUnavailable`,
   `fieldOf`, `withStatus`, `rest-errors.ts`, how REST answers an error, and
   `procedure.ts`, what every namespace builds alike.
 - `src/server/` is the BFF: `bun-side/` holds a directory per operation it
   serves itself, its DTOs and its service, `read-file/` with `ReadFileBff` and
-  `search-file/` with `SearchFileBff`, `cpp-side/` the
-  CLI runner and a service per C++ operation, `CustomCatCli` and
-  `CustomWcCli`, and `protocols/` the three transports, which `main.ts`
-  mounts on one router.
+  `search-file/` with `SearchFileBff`, `cpp-side/` `Core`, the client of the
+  C++ core, and `protocols/` the three transports, which `main.ts` mounts on
+  one router.
 - `src/client/data-access/` builds the RPC client as `AtomRpc` atoms
   (`effect/reactivity`), `BffRpcClient` in `clients/bff-rpc-client.ts`, and
   `data-access.ts` gives the forms one facade, `dataService`, with a mutation
@@ -501,7 +524,7 @@ type tests, which `bun run check` runs.
   and passes each its operation's `Request`, which its react-hook-form
   resolver uses.
   Each runs its procedure's mutation, which holds an `AsyncResult` of the success
-  struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
+  struct, failing with exactly the procedure's `Failure` (and `CoreUnavailable`, for
   a C++ operation) or the client's `RpcClientError`:
   `Atom.Failure<typeof dataService.mutation.customCat>`. `forms/shared/` holds what they all
   use, and knows no operation's errors: in `components/`, `TextField`, a

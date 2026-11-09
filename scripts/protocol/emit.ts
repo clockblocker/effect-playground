@@ -57,8 +57,8 @@ interface Operation {
 	}>;
 	readonly sameStruct: boolean;
 	readonly errors: readonly Definition[];
-	/** Its success's tag in what it prints, if it prints one. */
-	readonly successTag: string | undefined;
+	/** Whether the C++ core serves it, in CoreRpcs. */
+	readonly core: boolean;
 }
 
 /**
@@ -75,9 +75,10 @@ interface Operation {
  * it: each of its DTOs with its type, then what the generator derives from
  * them, `RequestShape`, the request without its checks, and `Path`, where in
  * a request an issue can be, then what every operation builds alike from
- * those, with `Origin.helpers`: `Issue`, `InvalidRequest`, `Failure` and, for
- * a C++ operation, `Output`, what it prints. Nothing is shared between
- * operations: each declares every struct and error it uses.
+ * those, with `Origin.helpers`: `Issue`, `InvalidRequest` and `Failure`.
+ * Nothing is shared between operations: each declares every struct and
+ * error it uses. `cpp-side/core-rpcs.ts` is `CoreRpcs`, the RPC group of the
+ * C++ operations, which the BFF calls the core with.
  *
  * Effect's own engine (`fromJsonSchemaDocument` → `toCodeDocument`) translates
  * each field's JSON Schema into a Schema expression. This emitter owns the
@@ -137,7 +138,7 @@ export function emit(
 			})),
 			sameStruct: procedure.success === procedure.payload,
 			errors,
-			successTag: procedure.successTag,
+			core: true,
 		});
 	}
 	for (const operation of bunSide) {
@@ -156,7 +157,7 @@ export function emit(
 			],
 			sameStruct: success === undefined,
 			errors: operation.errors,
-			successTag: undefined,
+			core: false,
 		});
 	}
 
@@ -204,7 +205,7 @@ export function emit(
 				join(origin.into, dtos),
 				[
 					'import { Schema } from "effect";',
-					`import { failureOf, InvalidRequestOf, issueOf${operation.successTag === undefined ? "" : ", outputOf"} } from "${fromHere(origin.helpers)}";`,
+					`import { failureOf, InvalidRequestOf, issueOf } from "${fromHere(origin.helpers)}";`,
 					`import * as Dto from "${relativeImport(namespace, dtos)}";`,
 				],
 				[
@@ -215,6 +216,36 @@ export function emit(
 		);
 		exports.push(
 			`export { ${operation.name} } from "${relativeImport("generated.ts", namespace)}";`,
+		);
+	}
+	const core = operations.filter((operation) => operation.core);
+	if (core.length > 0) {
+		const path = "cpp-side/core-rpcs.ts";
+		files.push(
+			module(
+				path,
+				origin.cpp,
+				[
+					'import { Rpc, RpcGroup } from "effect/rpc";',
+					...core.map(
+						({ name, directory }) =>
+							`import { ${name} } from "${relativeImport(path, `${directory}/${kebabCase(name)}-namespace.ts`)}";`,
+					),
+				],
+				[
+					"/** The C++ core's operations, as the BFF calls them over JSON-RPC: each request by its shape alone, as the core checks its rules. */",
+					"export class CoreRpcs extends RpcGroup.make(",
+					...core.map(
+						({ name }) =>
+							`Rpc.make(${JSON.stringify(name)}, { payload: ${name}.RequestShape, success: ${name}.Success, error: ${name}.Failure }),`,
+					),
+					") {}",
+					"",
+				],
+			),
+		);
+		exports.push(
+			`export { CoreRpcs } from "${relativeImport("generated.ts", path)}";`,
 		);
 	}
 	files.push({
@@ -243,7 +274,6 @@ const roleNames = [
 	"Issue",
 	"InvalidRequest",
 	"Failure",
-	"Output",
 	"Errors",
 ] as const;
 
@@ -321,12 +351,6 @@ function operationNamespace(operation: Operation): string {
 		"export const Failure = failureOf(InvalidRequest, Dto.Errors);",
 		"export type Failure = typeof Failure.Type;",
 		"",
-		...(operation.successTag === undefined
-			? []
-			: [
-					`export const Output = outputOf(${JSON.stringify(operation.successTag)}, Success, Failure);`,
-					"export type Output = typeof Output.Type;",
-				]),
 		"}",
 		"",
 	].join("\n");

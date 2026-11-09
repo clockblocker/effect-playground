@@ -1,21 +1,13 @@
-// custom_cat --input-file=NAME --output-file=NAME
-//
-// Copies files/NAME to files/NAME, under the working directory, replacing
-// the output if it exists. Its contract is protocol/custom_cat.hpp, and
-// run.hpp runs its steps: read the flags, check, copy, print.
+#include "operations/custom_cat.hpp"
 
 #include <string>
 
 #include "files.hpp"
-#include "protocol/custom_cat.hpp"
-#include "run.hpp"
 
-namespace {
+namespace custom_cat {
 
 using protocol::CustomCatRequest;
 
-// What the names' types can't say. Each name on its own first, every field
-// at once; then the two together, once each passes.
 rfl::Result<CustomCatRequest> check(const CustomCatRequest& request) {
 	const std::string& input = request.input_file().value();
 	const std::string& output = request.output_file().value();
@@ -48,9 +40,4 @@ protocol::CustomCatSuccess copy(const CustomCatRequest& request) {
 	return {.bytes_copied = text.size()};
 }
 
-}  // namespace
-
-int main(int argc, char* argv[]) {
-	return protocol::run<protocol::CustomCatOutput, CustomCatRequest>(
-		argc, argv, check, copy);
-}
+}  // namespace custom_cat

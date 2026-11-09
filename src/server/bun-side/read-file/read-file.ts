@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { getSystemErrorMessage } from "node:util";
 import {
 	Context,
@@ -96,7 +95,7 @@ export class ReadFileBff extends Context.Service<
 		);
 	}
 
-	static readonly layer = ReadFileBff.layerIn(
-		join(import.meta.dirname, "../../../.."),
-	);
+	// files/ under the working directory, as the core's: a compiled BFF has
+	// no source tree to find it from.
+	static readonly layer = ReadFileBff.layerIn(process.cwd());
 }

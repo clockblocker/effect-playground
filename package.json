@@ -4,8 +4,9 @@
 	"type": "module",
 	"packageManager": "bun@1.4.2",
 	"scripts": {
-		"dev": "bun scripts/cpp.ts && bun --watch src/server/main.ts",
-		"build": "bun build src/client/index.html --outdir dist --minify",
+		"dev": "bun scripts/cpp.ts && exec cpp/build/core -- bun --watch src/server/main.ts",
+		"build": "bun scripts/cpp.ts && bun build --compile --minify src/server/main.ts --outfile dist/bff",
+		"start": "exec cpp/build/core -- dist/bff",
 		"check": "tsc -p tsconfig.json --noEmit",
 		"lint": "biome check --error-on-warnings .",
 		"fix": "biome check --write .",

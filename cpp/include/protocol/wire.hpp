@@ -42,6 +42,10 @@ struct IoFailed {
 		message;
 };
 
+// The message a failure has: an InvalidRequest's joins its issues'.
+std::string message_of(const InvalidRequest& error);
+std::string message_of(const IoFailed& error);
+
 // An issue per failure in `error`, its message and its path, the fields'
 // wire names, such as "inputFile", and an array's indexes as numbers.
 std::vector<Issue> issues(rfl::Error&& error);

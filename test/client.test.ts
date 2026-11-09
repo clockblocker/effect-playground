@@ -11,7 +11,7 @@ import { Outcome } from "../src/client/forms/shared/components/outcome.tsx";
 import { issuesOf, setIssues } from "../src/client/forms/shared/helpers.ts";
 import { CustomCat } from "../src/shared/generated/generated.ts";
 import {
-	CliFailed,
+	CoreUnavailable,
 	type CppSideFailure,
 } from "../src/shared/helpers/tagged-errors.ts";
 
@@ -82,12 +82,12 @@ describe("Outcome", () => {
 		expect(
 			failed(
 				Cause.fail(
-					new CliFailed({
-						message: "custom_cat timed out after 5000 ms",
+					new CoreUnavailable({
+						message: "The core at 127.0.0.1:1 is gone",
 					}),
 				),
 			),
-		).toBe(`<p role="alert">custom_cat timed out after 5000 ms</p>`);
+		).toBe(`<p role="alert">The core at 127.0.0.1:1 is gone</p>`);
 	});
 
 	test("shows any other failure by its message, whatever its operation", () => {
@@ -147,7 +147,7 @@ describe("issuesOf", () => {
 		expect(issuesOf(Exit.succeed({ bytesCopied: 6 }))).toEqual([]);
 		expect(
 			issuesOf<CopyFailure>(
-				Exit.fail(new CliFailed({ message: "gone" })),
+				Exit.fail(new CoreUnavailable({ message: "gone" })),
 			),
 		).toEqual([]);
 		expect(issuesOf<CopyFailure>(Exit.die("broken"))).toEqual([]);

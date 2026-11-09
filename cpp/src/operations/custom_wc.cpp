@@ -1,23 +1,15 @@
-// custom_wc --file=NAME
-//
-// Counts the lines, words and bytes of files/NAME, under the working
-// directory, as wc does: a line ends in a newline, and a word is a run of
-// characters that aren't whitespace. Its contract is protocol/custom_wc.hpp,
-// and run.hpp runs its steps: read the flags, check, count, print.
+#include "operations/custom_wc.hpp"
 
 #include <cctype>
 #include <cstdint>
 #include <string>
 
 #include "files.hpp"
-#include "protocol/custom_wc.hpp"
-#include "run.hpp"
 
-namespace {
+namespace custom_wc {
 
 using protocol::CustomWcRequest;
 
-// What the name's type can't say: the file is there, and isn't a link.
 rfl::Result<CustomWcRequest> check(const CustomWcRequest& request) {
 	const std::string& file = request.file().value();
 	if (auto link = files::link_issue(file)) {
@@ -43,9 +35,4 @@ protocol::CustomWcSuccess count(const CustomWcRequest& request) {
 	return {.lines = lines, .words = words, .bytes = text.size()};
 }
 
-}  // namespace
-
-int main(int argc, char* argv[]) {
-	return protocol::run<protocol::CustomWcOutput, CustomWcRequest>(
-		argc, argv, check, count);
-}
+}  // namespace custom_wc

@@ -1,5 +1,5 @@
 // How the REST API answers an operation's errors, whatever they are, by the
-// layer they come from: its InvalidRequest is the client's fault; CliFailed,
+// layer they come from: its InvalidRequest is the client's fault; CoreUnavailable,
 // the BFF failing to run a C++ operation, is a service it depends on
 // failing; and any other error, such as a disk that failed, is the server's.
 // An endpoint lists its operation's failure, not each error by hand.
@@ -7,7 +7,7 @@
 import type { Schema } from "effect";
 import { HttpApiMiddleware } from "effect/http-api";
 import { isInvalidRequestClass } from "./procedure.ts";
-import { CliFailed } from "./tagged-errors.ts";
+import { CoreUnavailable } from "./tagged-errors.ts";
 import { withStatus } from "./with-status.ts";
 
 /** An error class: a schema whose `_tag` field is a literal. */
@@ -28,7 +28,7 @@ const withItsStatus = <S extends Tagged>(error: S): WithStatus<S> =>
 	withStatus(
 		isInvalidRequestClass(error)
 			? 422
-			: (error as Schema.Top) === CliFailed
+			: (error as Schema.Top) === CoreUnavailable
 				? 503
 				: 500,
 	)(error);

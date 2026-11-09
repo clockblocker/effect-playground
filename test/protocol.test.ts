@@ -9,7 +9,11 @@ import {
 	type Origin,
 } from "../scripts/protocol/emit.ts";
 import { normalize, normalizeEffect } from "../scripts/protocol/normalize.ts";
-import { CustomCat, ReadFile } from "../src/shared/generated/generated.ts";
+import {
+	CoreRpcs,
+	CustomCat,
+	ReadFile,
+} from "../src/shared/generated/generated.ts";
 import { fieldOf } from "../src/shared/helpers/field-of.ts";
 
 // The JSON forms both sides agree on.
@@ -127,21 +131,15 @@ describe("generated protocol", () => {
 		).toThrow();
 	});
 
-	test("Output is what custom_cat prints, each kind by its tag", () => {
-		const decode = Schema.decodeUnknownSync(
-			Schema.fromJsonString(CustomCat.Output),
-		);
-		expect(decode('{"_tag":"Success","bytesCopied":6}')).toEqual({
-			_tag: "Success",
-			bytesCopied: 6,
-		});
-		expect(decode(JSON.stringify(wire.invalidRequest))).toBeInstanceOf(
-			CustomCat.InvalidRequest,
-		);
-		expect(
-			decode('{"_tag":"IoFailed","message":"Is a directory"}'),
-		).toBeInstanceOf(CustomCat.IoFailed);
-		expect(() => decode('{"bytesCopied":6}')).toThrow();
+	test("CoreRpcs calls each C++ operation by its shape, failing with its Failure", () => {
+		expect([...CoreRpcs.requests.keys()]).toEqual([
+			"CustomCat",
+			"CustomWc",
+		]);
+		const copy = CoreRpcs.requests.get("CustomCat");
+		expect(copy?.payloadSchema).toBe(CustomCat.RequestShape);
+		expect(copy?.successSchema).toBe(CustomCat.Success);
+		expect(copy?.errorSchema).toBe(CustomCat.Failure);
 	});
 
 	test("an issue's path is one of its method's fields, or the whole request", () => {
@@ -368,6 +366,7 @@ describe("emitter", () => {
 		expect([...files.keys()]).toEqual([
 			"cpp-side/get/get-dtos.ts",
 			"cpp-side/get/get-namespace.ts",
+			"cpp-side/core-rpcs.ts",
 			"generated.ts",
 		]);
 		expect(files.get("generated.ts")).toBe(
@@ -379,6 +378,7 @@ describe("emitter", () => {
 				"*/",
 				"",
 				'export { Get } from "./cpp-side/get/get-namespace.ts";',
+				'export { CoreRpcs } from "./cpp-side/core-rpcs.ts";',
 				"",
 			].join("\n"),
 		);
@@ -389,9 +389,10 @@ describe("emitter", () => {
 			"/*\nGenerated\n- from: out/cpp-side/get/get-dtos.ts\n- by: gen.ts\n*/\n",
 		);
 		expect(emitted(fixture())).not.toContain("What the batch is called.");
-		// The headers, and a link to the DTOs and the source on the namespace.
+		// The headers, a link to the DTOs and the source on the namespace, and
+		// CoreRpcs's doc.
 		expect(emitted(fixture()).match(/\/[*/]/g)).toHaveLength(
-			files.size + 1,
+			files.size + 2,
 		);
 		expect(emitted(fixture())).not.toContain("__");
 	});
@@ -529,18 +530,14 @@ describe("emitter", () => {
 		expect(busy.message).toBe("the disk is busy");
 	});
 
-	test("writes Output, the success tagged, or a failure", async () => {
-		expect(emitted(fixture())).toContain(
-			'export const Output = outputOf("Success", Success, Failure);',
-		);
-		const { Get } = await load(fixture());
-		const decode = Schema.decodeUnknownSync(Get.Output);
-		expect(decode({ _tag: "Success", count: 2 })).toEqual({
-			_tag: "Success",
-			count: 2,
-		});
-		expect(() => decode({ count: 2 })).toThrow();
-		expect(Schema.is(Get.Success)({ count: 2 })).toBe(true);
+	test("writes CoreRpcs, an RPC per C++ operation, by its shape", async () => {
+		expect(emitted(fixture())).not.toContain("Output");
+		const { CoreRpcs, Get } = await load(fixture());
+		const get = CoreRpcs.requests.get("Get");
+		expect([...CoreRpcs.requests.keys()]).toEqual(["Get"]);
+		expect(get.payloadSchema).toBe(Get.RequestShape);
+		expect(get.successSchema).toBe(Get.Success);
+		expect(get.errorSchema).toBe(Get.Failure);
 	});
 
 	test("rejects an error field that would shadow Error's own", () => {

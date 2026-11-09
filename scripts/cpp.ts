@@ -5,11 +5,11 @@ const root = join(import.meta.dir, "..");
 const source = join(root, "cpp");
 const build = join(source, "build");
 
-/** Copies one .txt file in `files/` to another; see `cpp/src/custom_cat.cpp`. */
-export const customCatBinary = join(build, "custom_cat");
-
-/** Counts a .txt file's lines, words and bytes; see `cpp/src/custom_wc.cpp`. */
-export const customWcBinary = join(build, "custom_wc");
+/**
+ * The C++ core, which serves the C++ operations over JSON-RPC and launches
+ * the command after `--`, the BFF; see `cpp/src/core.cpp`.
+ */
+export const coreBinary = join(build, "core");
 
 /** Prints the JSON Schema of `cpp/include/protocol.hpp`. */
 export const protocolSchemaBinary = join(build, "protocol_schema");

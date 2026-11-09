@@ -1,29 +1,22 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunServices } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
-import { buildCpp } from "../scripts/cpp.ts";
-import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
-import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
+import { Core } from "../src/server/cpp-side/core.ts";
 import { McpRoutes } from "../src/server/protocols/mcp.ts";
+import { closedPort, fakeCore, startCore } from "./support/core.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "mcp-"));
 
 const disposers: Array<() => Promise<void>> = [];
 
-/** An MCP client over HTTP, of a server whose custom_cat is `binary`. */
-function mcp(binary?: string) {
+/** An MCP client over HTTP, of a server calling `core`. */
+function mcp(core: Layer.Layer<Core>) {
 	const { handler, dispose } = HttpRouter.toWebHandler(
-		McpRoutes.pipe(
-			Layer.provide([
-				CustomCatCli.layerWith({ directory, binary }),
-				CustomWcCli.layerWith({ directory }),
-			]),
-			Layer.provide(BunServices.layer),
-		),
+		McpRoutes.pipe(Layer.provide(core), Layer.provide(BunServices.layer)),
 		{ disableLogger: true },
 	);
 	disposers.push(dispose);
@@ -83,25 +76,30 @@ function mcp(binary?: string) {
 	return { post, initialize, callCustomCat };
 }
 
-const { post, initialize, callCustomCat } = mcp();
+// The MCP client of a real core, serving `directory`, once it has started.
+let core: Awaited<ReturnType<typeof startCore>>;
+let client: ReturnType<typeof mcp>;
+const post = (method: string, params?: object) => client.post(method, params);
+const initialize = () => client.initialize();
+const callCustomCat = (inputFile: string, outputFile: string) =>
+	client.callCustomCat(inputFile, outputFile);
 
-/** An MCP client whose server's custom_cat is a script that runs `body`. */
-async function withScript(name: string, body: string) {
-	const path = join(directory, name);
-	await Bun.write(path, `#!/bin/sh\n${body}\n`);
-	chmodSync(path, 0o755);
-	const client = mcp(path);
-	await client.initialize();
-	return client;
+/** An initialized MCP client of a server calling `core`. */
+async function connected(core: Layer.Layer<Core>) {
+	const other = mcp(core);
+	await other.initialize();
+	return other;
 }
 
 describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 	beforeAll(async () => {
-		buildCpp();
 		await Bun.write(join(directory, "files/hello.txt"), "Hello\n");
+		core = await startCore(directory);
+		client = mcp(core.layer);
 	}, 600_000);
 	afterAll(async () => {
 		for (const dispose of disposers) await dispose();
+		await core.stop();
 		rmSync(directory, { recursive: true, force: true });
 	});
 
@@ -225,14 +223,17 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 			],
 			isError: true,
 		});
-		const binary = join(directory, "missing");
-		const missing = mcp(binary);
-		await missing.initialize();
-		expect(await missing.callCustomCat("hello.txt", "copy.txt")).toEqual({
+		const port = closedPort();
+		const missing = await connected(Core.connect(port));
+		expect(
+			await missing.callCustomCat("hello.txt", "copy.txt"),
+		).toMatchObject({
 			content: [
 				{
 					type: "text",
-					text: `NotFound: ChildProcess.spawn (${binary} --input-file=hello.txt --output-file=copy.txt)`,
+					text: expect.stringContaining(
+						`The core at 127.0.0.1:${port} can't be reached: `,
+					),
 				},
 			],
 			isError: true,
@@ -240,7 +241,22 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 	});
 
 	test("answers a defect with a tool error that says nothing about it", async () => {
-		const broken = await withScript("broken", "echo secret >&2\nexit 4");
+		const fake = fakeCore(({ id }) => ({
+			jsonrpc: "2.0",
+			id,
+			error: {
+				_tag: "Cause",
+				code: 0,
+				message: "secret",
+				data: [
+					{
+						_tag: "Die",
+						defect: { name: "Error", message: "secret" },
+					},
+				],
+			},
+		}));
+		const broken = await connected(Core.connect(fake.port));
 		expect(await broken.callCustomCat("hello.txt", "copy.txt")).toEqual({
 			content: [
 				{
@@ -250,5 +266,6 @@ describe.skipIf(Bun.which("cmake") === null)("MCP server", () => {
 			],
 			isError: true,
 		});
+		fake.stop();
 	});
 });

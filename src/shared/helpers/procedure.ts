@@ -77,18 +77,3 @@ export const failureOf = <
 	invalidRequest: I,
 	errors: E,
 ) => Schema.Union([invalidRequest, ...errors]);
-
-/** What a procedure prints: its success, tagged `tag`, or what it fails with. */
-export const outputOf = <
-	Tag extends string,
-	Fields extends Schema.Struct.Fields,
-	Members extends ReadonlyArray<Schema.Top>,
->(
-	tag: Tag,
-	success: Schema.Struct<Fields>,
-	failure: Schema.Union<Members>,
-) =>
-	Schema.Union([
-		Schema.TaggedStruct(tag, success.fields),
-		...failure.members,
-	]);

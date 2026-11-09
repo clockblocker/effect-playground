@@ -27,6 +27,16 @@ std::string wire_name(std::string_view name) {
 
 }  // namespace
 
+std::string message_of(const InvalidRequest& error) {
+	std::string message;
+	for (const auto& issue : error.issues().value()) {
+		message += (message.empty() ? "" : "; ") + issue.message();
+	}
+	return message;
+}
+
+std::string message_of(const IoFailed& error) { return error.message(); }
+
 std::vector<Issue> issues(rfl::Error&& error) {
 	std::vector<Issue> issues;
 	for (auto& detail : std::move(error).details()) {

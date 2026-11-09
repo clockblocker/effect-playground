@@ -15,8 +15,6 @@ export interface Procedure {
 	readonly payload: string;
 	/** The output's first alternative, without its tag. */
 	readonly success: string;
-	/** The success's tag in the output, such as `Success`. */
-	readonly successTag: string;
 	/** What it fails with besides InvalidRequest, such as `IoFailed`. */
 	readonly errors: readonly string[];
 }
@@ -209,7 +207,6 @@ function procedure(
 	return {
 		payload: refName(field("payload"), "payload"),
 		success,
-		successTag,
 		errors,
 	};
 }

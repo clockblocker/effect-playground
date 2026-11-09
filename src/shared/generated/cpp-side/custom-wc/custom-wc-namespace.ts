@@ -9,7 +9,6 @@ import {
 	failureOf,
 	InvalidRequestOf,
 	issueOf,
-	outputOf,
 } from "../../../helpers/procedure.ts";
 import * as Dto from "./custom-wc-dtos.ts";
 
@@ -45,7 +44,4 @@ export namespace CustomWc {
 
 	export const Failure = failureOf(InvalidRequest, Dto.Errors);
 	export type Failure = typeof Failure.Type;
-
-	export const Output = outputOf("Success", Success, Failure);
-	export type Output = typeof Output.Type;
 }

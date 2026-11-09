@@ -17,8 +17,7 @@ import {
 } from "../../shared/rest-api.ts";
 import { ReadFileBff } from "../bun-side/read-file/read-file.ts";
 import { SearchFileBff } from "../bun-side/search-file/search-file.ts";
-import { CustomCatCli } from "../cpp-side/custom-cat.ts";
-import { CustomWcCli } from "../cpp-side/custom-wc.ts";
+import { Core } from "../cpp-side/core.ts";
 
 const standardIssues = SchemaIssue.makeFormatterStandardSchemaV1();
 
@@ -79,16 +78,17 @@ const FilesHandlers = HttpApiBuilder.group(
 	Effect.fn(function* (handlers) {
 		const readFile = yield* ReadFileBff;
 		const searchFile = yield* SearchFileBff;
-		const customCat = yield* CustomCatCli;
-		const customWc = yield* CustomWcCli;
+		const core = yield* Core;
 		return handlers.handleAll({
 			ReadFile: ({ params }) =>
 				readFile
 					.run(params)
 					.pipe(Effect.map(({ contents }) => contents)),
 			SearchFile: ({ payload }) => searchFile.run(payload),
-			CustomCat: ({ payload }) => customCat.run(payload),
-			CustomWc: ({ payload }) => customWc.run(payload),
+			CustomCat: ({ payload }) =>
+				core.call((operations) => operations.CustomCat(payload)),
+			CustomWc: ({ payload }) =>
+				core.call((operations) => operations.CustomWc(payload)),
 		});
 	}),
 );

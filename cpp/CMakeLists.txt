@@ -25,24 +25,34 @@ FetchContent_MakeAvailable(reflectcpp)
 
 # The bodies of what include/ declares, which every executable links: a
 # header there declares, and its .cpp here defines. Only templates, such as
-# run(), and types stay in the headers, which every file that uses them
-# must see.
+# Operations::add, and types stay in the headers, which every file that uses
+# them must see.
 add_library(shared STATIC
 	src/files.cpp
+	src/operations/custom_cat.cpp
+	src/operations/custom_wc.cpp
 	src/protocol/names.cpp
 	src/protocol/wire.cpp
 )
 target_include_directories(shared PUBLIC include)
 target_link_libraries(shared PUBLIC reflectcpp)
 
-add_executable(custom_cat src/custom_cat.cpp)
-add_executable(custom_wc src/custom_wc.cpp)
+find_package(Threads REQUIRED)
+
+# The core: serves the operations over JSON-RPC, and launches the BFF.
+add_executable(core
+	src/core.cpp
+	src/core/json_rpc.cpp
+	src/core/operation.cpp
+	src/core/tcp_server.cpp
+	src/core/watchdog.cpp
+)
+target_link_libraries(core PRIVATE shared Threads::Threads)
+
+# Prints the protocol's JSON Schema, which bun run generate reads.
 add_executable(protocol_schema src/protocol_schema.cpp)
+target_link_libraries(protocol_schema PRIVATE shared)
 
-foreach(target custom_cat custom_wc protocol_schema)
-	target_link_libraries(${target} PRIVATE shared)
-endforeach()
-
-foreach(target shared custom_cat custom_wc protocol_schema)
+foreach(target shared core protocol_schema)
 	target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
 endforeach()

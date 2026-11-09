@@ -6,5 +6,6 @@ Generated
 
 export { ReadFile } from "./bun-side/read-file/read-file-namespace.ts";
 export { SearchFile } from "./bun-side/search-file/search-file-namespace.ts";
+export { CoreRpcs } from "./cpp-side/core-rpcs.ts";
 export { CustomCat } from "./cpp-side/custom-cat/custom-cat-namespace.ts";
 export { CustomWc } from "./cpp-side/custom-wc/custom-wc-namespace.ts";

@@ -1,23 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-	chmodSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	symlinkSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Result } from "effect";
 import { HttpRouter } from "effect/http";
-import { buildCpp } from "../scripts/cpp.ts";
 import { ReadFileBff } from "../src/server/bun-side/read-file/read-file.ts";
 import { SearchFileBff } from "../src/server/bun-side/search-file/search-file.ts";
-import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
-import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
+import { Core } from "../src/server/cpp-side/core.ts";
 import { RestRoutes } from "../src/server/protocols/rest.ts";
 import { ReadFile, SearchFile } from "../src/shared/generated/generated.ts";
+import { closedPort, fakeCore, startCore } from "./support/core.ts";
 
 // Effect's own messages, for the rules ReadFile.Request checks.
 const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";
@@ -46,15 +39,11 @@ const readScratch = readIn(ReadFileBff.layerIn(scratch));
 
 const handlers: Array<() => Promise<void>> = [];
 
-/** The REST API over files in `scratch`, custom_cat being `binary`. */
-function rest(binary?: string) {
+/** The REST API over files in `scratch`, calling `core`. */
+function rest(core: Layer.Layer<Core>) {
 	const { handler, dispose } = HttpRouter.toWebHandler(
 		RestRoutes.pipe(
-			Layer.provide([
-				SearchFileBff.layer,
-				CustomCatCli.layerWith({ directory: scratch, binary }),
-				CustomWcCli.layerWith({ directory: scratch }),
-			]),
+			Layer.provide([SearchFileBff.layer, core]),
 			Layer.provideMerge(ReadFileBff.layerIn(scratch)),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
@@ -96,7 +85,13 @@ function rest(binary?: string) {
 	};
 }
 
-const { get, search, copy, count } = rest();
+// The REST API of a real core, serving `scratch`, once it has started.
+let api: ReturnType<typeof rest>;
+let core: Awaited<ReturnType<typeof startCore>>;
+const get = (name: string) => api.get(name);
+const search = (payload: object) => api.search(payload);
+const copy = (payload: object) => api.copy(payload);
+const count = (payload: object) => api.count(payload);
 
 /** SearchFileBff over the files in `scratch`. */
 const searchScratch = (request: SearchFile.RequestShape) =>
@@ -114,16 +109,7 @@ const searchScratch = (request: SearchFile.RequestShape) =>
 		),
 	);
 
-/** An executable shell script standing in for custom_cat. */
-async function script(name: string, body: string) {
-	const path = join(scratch, name);
-	await Bun.write(path, `#!/bin/sh\n${body}\n`);
-	chmodSync(path, 0o755);
-	return path;
-}
-
 beforeAll(async () => {
-	buildCpp();
 	await Bun.write(join(scratch, "files/hello.txt"), "Hello\n");
 	await Bun.write(join(scratch, "files/config.json"), "{}");
 	await Bun.write(
@@ -131,10 +117,13 @@ beforeAll(async () => {
 		"the cat\nsat on\nthe mat\n",
 	);
 	mkdirSync(join(scratch, "files/dir.txt"));
+	core = await startCore(scratch);
+	api = rest(core.layer);
 }, 600_000);
 
 afterAll(async () => {
 	for (const dispose of handlers) await dispose();
+	await core.stop();
 	rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -389,26 +378,46 @@ describe("REST", () => {
 		).toBe(500);
 	});
 
-	test("answers CliFailed with 503 and its JSON", async () => {
-		const binary = join(scratch, "missing");
-		const { status, body } = await rest(binary).copy({
+	test("answers CoreUnavailable with 503 and its JSON", async () => {
+		const port = closedPort();
+		const { status, body } = await rest(Core.connect(port)).copy({
 			inputFile: "hello.txt",
 			outputFile: "copy.txt",
 		});
 		expect(status).toBe(503);
-		expect(JSON.parse(body)).toEqual({
-			_tag: "CliFailed",
-			message: `NotFound: ChildProcess.spawn (${binary} --input-file=hello.txt --output-file=copy.txt)`,
+		expect(JSON.parse(body)).toMatchObject({
+			_tag: "CoreUnavailable",
+			message: expect.stringContaining(`The core at 127.0.0.1:${port}`),
 		});
 	});
 
 	test("answers a defect with an empty 500", async () => {
-		const binary = await script("broken", "echo broken >&2\nexit 4");
-		const { status, body } = await rest(binary).copy({
-			inputFile: "hello.txt",
-			outputFile: "copy.txt",
-		});
-		expect(status).toBe(500);
-		expect(body).toBe("");
+		const broken = fakeCore(({ id }) => ({
+			jsonrpc: "2.0",
+			id,
+			error: {
+				_tag: "Cause",
+				code: 0,
+				message: "secret",
+				data: [
+					{
+						_tag: "Die",
+						defect: { name: "Error", message: "secret" },
+					},
+				],
+			},
+		}));
+		try {
+			const { status, body } = await rest(Core.connect(broken.port)).copy(
+				{
+					inputFile: "hello.txt",
+					outputFile: "copy.txt",
+				},
+			);
+			expect(status).toBe(500);
+			expect(body).toBe("");
+		} finally {
+			broken.stop();
+		}
 	});
 });
