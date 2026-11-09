@@ -6,7 +6,8 @@ import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp, customCatBinary, customWcBinary } from "../scripts/cpp.ts";
-import { BffReader } from "../src/server/bun-side/bff-reader.ts";
+import { BffReader } from "../src/server/bun-side/read-file/read-file.ts";
+import { BffSearcher } from "../src/server/bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RpcRoutes } from "../src/server/protocols/rpc.ts";
@@ -20,7 +21,7 @@ const server = (binary: string) =>
 	HttpRouter.toWebHandler(
 		RpcRoutes.pipe(
 			Layer.provide([
-				BffReader.layerIn(directory),
+				BffSearcher.layer,
 				CustomCatCli.layerWith({
 					directory,
 					binary,
@@ -28,6 +29,7 @@ const server = (binary: string) =>
 				}),
 				CustomWcCli.layerWith({ directory, binary: customWcBinary }),
 			]),
+			Layer.provideMerge(BffReader.layerIn(directory)),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
 		),
@@ -179,6 +181,24 @@ describe("RPC", () => {
 		},
 		600_000,
 	);
+
+	test("searches a file, and answers with its matches", async () => {
+		await Bun.write(join(directory, "files/notes.txt"), "a\nb\na b\n");
+		const response = await call("SearchFile", {
+			name: "notes.txt",
+			query: "b",
+		});
+		const [{ exit }] = await response.json();
+		expect(exit).toEqual({
+			_tag: "Success",
+			value: {
+				matches: [
+					{ line: 2, text: "b" },
+					{ line: 3, text: "a b" },
+				],
+			},
+		});
+	});
 
 	test("kills custom_cat when the client abandons the call", async () => {
 		const controller = new AbortController();

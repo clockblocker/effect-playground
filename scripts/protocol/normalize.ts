@@ -325,34 +325,54 @@ function rewrite(
 
 /**
  * The JSON Schema that Effect's `toJsonSchemaDocument` writes for a
- * hand-written struct, as the emitter takes one: descriptions dropped, and
- * objects closed, as a Struct decodes. Fails on one with definitions, which
- * no hand-written DTO needs yet.
+ * hand-written struct or error class, as the emitter takes one: `$ref`s
+ * inlined, descriptions dropped, objects closed, as a Struct decodes, and an
+ * integer's safe bounds, which are Int's own, left to `Schema.Int`. An
+ * error's `_tag` is its tag.
  */
 export function normalizeEffect(
 	document: JsonSchema.Document<"draft-2020-12">,
 	name: string,
 ): Definition {
-	if (Object.keys(document.definitions).length > 0) {
-		throw new Error(
-			`${name} refers to definitions, which the emitter can't follow`,
-		);
-	}
-	const close = (value: unknown): unknown => {
-		if (Array.isArray(value)) return value.map(close);
+	const inline = (value: unknown, seen: ReadonlySet<string>): unknown => {
+		if (Array.isArray(value))
+			return value.map((item) => inline(item, seen));
 		if (!Predicate.isObject(value)) return value;
+		const ref = value.$ref;
+		if (typeof ref === "string") {
+			const key = ref.slice(definitionRef.length);
+			const definition = document.definitions[key];
+			if (!ref.startsWith(definitionRef) || definition === undefined) {
+				throw new Error(`${name} has an unsupported $ref ${ref}`);
+			}
+			if (seen.has(key)) throw new Error(`${name} contains itself`);
+			return inline(definition, new Set([...seen, key]));
+		}
 		const result: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
-			if (key !== "description") result[key] = close(item);
+			if (key !== "description") result[key] = inline(item, seen);
 		}
 		if (result.type === "object") result.additionalProperties = false;
+		if (
+			result.type === "integer" &&
+			result.minimum === Number.MIN_SAFE_INTEGER &&
+			result.maximum === Number.MAX_SAFE_INTEGER
+		) {
+			delete result.minimum;
+			delete result.maximum;
+		}
 		return result;
 	};
-	const schema = close(document.schema) as JsonSchema.JsonSchema;
+	const schema = inline(document.schema, new Set()) as JsonSchema.JsonSchema;
 	if (schema.type !== "object" || !Predicate.isObject(schema.properties)) {
 		throw new Error(`${name} must be a struct`);
 	}
-	return { name, schema, tag: undefined };
+	const tag = schema.properties._tag;
+	return {
+		name,
+		schema,
+		tag: Predicate.isObject(tag) ? singleLiteral(tag) : undefined,
+	};
 }
 
 /**

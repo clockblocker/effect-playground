@@ -1,5 +1,10 @@
 {
-	"entry": ["src/server/main.ts", "scripts/*.ts", "test/**/*.test.ts"],
+	"entry": [
+		"src/server/main.ts",
+		"scripts/*.ts",
+		"test/**/*.test.ts",
+		"src/server/bun-side/*/*-dtos.ts"
+	],
 	"ignoreDependencies": ["@effect/platform-node-shared"],
 	"ignoreIssues": {
 		"src/shared/generated/**": ["namespaceMembers"]

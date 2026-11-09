@@ -12,11 +12,12 @@ import { BunHttpServer, BunServices } from "@effect/platform-bun";
 import { Effect, Layer, Result } from "effect";
 import { HttpRouter } from "effect/http";
 import { buildCpp } from "../scripts/cpp.ts";
-import { BffReader } from "../src/server/bun-side/bff-reader.ts";
+import { BffReader } from "../src/server/bun-side/read-file/read-file.ts";
+import { BffSearcher } from "../src/server/bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../src/server/cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../src/server/cpp-side/custom-wc.ts";
 import { RestRoutes } from "../src/server/protocols/rest.ts";
-import { ReadFile } from "../src/shared/generated/generated.ts";
+import { ReadFile, SearchFile } from "../src/shared/generated/generated.ts";
 
 // Effect's own messages, for the rules ReadFile.Request checks.
 const notTxt = "Expected a string matching the RegExp ^.+\\.txt$";
@@ -50,10 +51,11 @@ function rest(binary?: string) {
 	const { handler, dispose } = HttpRouter.toWebHandler(
 		RestRoutes.pipe(
 			Layer.provide([
-				BffReader.layerIn(scratch),
+				BffSearcher.layer,
 				CustomCatCli.layerWith({ directory: scratch, binary }),
 				CustomWcCli.layerWith({ directory: scratch }),
 			]),
+			Layer.provideMerge(BffReader.layerIn(scratch)),
 			Layer.provide(BunServices.layer),
 			Layer.provide(BunHttpServer.layerHttpServices),
 		),
@@ -75,6 +77,14 @@ function rest(binary?: string) {
 					body: JSON.stringify(payload),
 				}),
 			),
+		search: (payload: object) =>
+			answer(
+				new Request("http://127.0.0.1/api/files/search", {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(payload),
+				}),
+			),
 		count: (payload: object) =>
 			answer(
 				new Request("http://127.0.0.1/api/files/count", {
@@ -86,7 +96,23 @@ function rest(binary?: string) {
 	};
 }
 
-const { get, copy, count } = rest();
+const { get, search, copy, count } = rest();
+
+/** BffSearcher over the files in `scratch`. */
+const searchScratch = (request: SearchFile.RequestShape) =>
+	Effect.runPromise(
+		Effect.gen(function* () {
+			return yield* (yield* BffSearcher).search(request);
+		}).pipe(
+			Effect.result,
+			Effect.provide(
+				BffSearcher.layer.pipe(
+					Layer.provide(BffReader.layerIn(scratch)),
+					Layer.provide(BunServices.layer),
+				),
+			),
+		),
+	);
 
 /** An executable shell script standing in for custom_cat. */
 async function script(name: string, body: string) {
@@ -100,6 +126,10 @@ beforeAll(async () => {
 	buildCpp();
 	await Bun.write(join(scratch, "files/hello.txt"), "Hello\n");
 	await Bun.write(join(scratch, "files/config.json"), "{}");
+	await Bun.write(
+		join(scratch, "files/poem.txt"),
+		"the cat\nsat on\nthe mat\n",
+	);
 	mkdirSync(join(scratch, "files/dir.txt"));
 }, 600_000);
 
@@ -175,7 +205,75 @@ describe("BffReader in a files/ of its own", () => {
 	});
 });
 
+describe("BffSearcher", () => {
+	test("finds every line with the query, numbered from 1", async () => {
+		expect(await searchScratch({ name: "poem.txt", query: "the" })).toEqual(
+			Result.succeed({
+				matches: [
+					{ line: 1, text: "the cat" },
+					{ line: 3, text: "the mat" },
+				],
+			}),
+		);
+		expect(await searchScratch({ name: "poem.txt", query: "dog" })).toEqual(
+			Result.succeed({ matches: [] }),
+		);
+	});
+
+	test("reports every field's rule it breaks, each under its field", async () => {
+		const result = await searchScratch({ name: "x.md", query: "" });
+		expect(Result.isFailure(result) && result.failure).toEqual(
+			new SearchFile.InvalidRequest({
+				issues: [
+					{
+						message:
+							"Expected a string with at least 5 code points",
+						path: ["name"],
+					},
+					{
+						message: "Expected a value with a length of at least 1",
+						path: ["query"],
+					},
+				],
+			}),
+		);
+	});
+
+	test("reports what BffReader says of the file, as its own", async () => {
+		const missing = await searchScratch({
+			name: "missing.txt",
+			query: "a",
+		});
+		expect(Result.isFailure(missing) && missing.failure).toBeInstanceOf(
+			SearchFile.InvalidRequest,
+		);
+		const directory = await searchScratch({ name: "dir.txt", query: "a" });
+		expect(Result.isFailure(directory) && directory.failure).toEqual(
+			new SearchFile.IoFailed({
+				message: "illegal operation on a directory",
+			}),
+		);
+	});
+});
+
 describe("REST", () => {
+	test("answers a search with its matches", async () => {
+		const { status, body } = await search({
+			name: "poem.txt",
+			query: "sat",
+		});
+		expect(status).toBe(200);
+		expect(JSON.parse(body)).toEqual({
+			matches: [{ line: 2, text: "sat on" }],
+		});
+		const wrongShape = await search({ name: "poem.txt" });
+		expect(wrongShape.status).toBe(422);
+		expect(JSON.parse(wrongShape.body)).toEqual({
+			_tag: "InvalidRequest",
+			issues: [{ message: "Missing key", path: ["query"] }],
+		});
+	});
+
 	test("answers a file with its text", async () => {
 		const { status, body } = await get("hello.txt");
 		expect(status).toBe(200);

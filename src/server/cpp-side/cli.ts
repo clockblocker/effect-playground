@@ -8,7 +8,7 @@ import {
 	Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
-import { CliFailed } from "../../shared/helpers/cli-failed.ts";
+import { CliFailed } from "../../shared/helpers/tagged-errors.ts";
 
 const root = join(import.meta.dirname, "../../..");
 

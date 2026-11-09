@@ -4,13 +4,19 @@ import {
 	type HttpApiError,
 	HttpApiMiddleware,
 } from "effect/http-api";
-import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
+import {
+	CustomCat,
+	CustomWc,
+	SearchFile,
+} from "../../shared/generated/generated.ts";
 import {
 	BffApi,
 	CustomCatSchemaErrors,
 	CustomWcSchemaErrors,
+	SearchFileSchemaErrors,
 } from "../../shared/rest-api.ts";
-import { BffReader } from "../bun-side/bff-reader.ts";
+import { BffReader } from "../bun-side/read-file/read-file.ts";
+import { BffSearcher } from "../bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
@@ -51,6 +57,10 @@ const SchemaErrors = Layer.mergeAll(
 		CustomWcSchemaErrors,
 		asInvalidRequest(CustomWc),
 	),
+	HttpApiMiddleware.layerSchemaErrorTransform(
+		SearchFileSchemaErrors,
+		asInvalidRequest(SearchFile),
+	),
 );
 
 const FilesHandlers = HttpApiBuilder.group(
@@ -58,6 +68,7 @@ const FilesHandlers = HttpApiBuilder.group(
 	"files",
 	Effect.fn(function* (handlers) {
 		const reader = yield* BffReader;
+		const searcher = yield* BffSearcher;
 		const cat = yield* CustomCatCli;
 		const wc = yield* CustomWcCli;
 		return handlers
@@ -66,6 +77,7 @@ const FilesHandlers = HttpApiBuilder.group(
 					.read(params.name)
 					.pipe(Effect.map(({ contents }) => contents)),
 			)
+			.handle("search", ({ payload }) => searcher.search(payload))
 			.handle("copy", ({ payload }) => cat.run(payload))
 			.handle("count", ({ payload }) => wc.run(payload));
 	}),

@@ -1,8 +1,8 @@
 import { Effect, Layer, Schema } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
 import { CustomCat, CustomWc } from "../../shared/generated/generated.ts";
-import { CliFailed } from "../../shared/helpers/cli-failed.ts";
 import { fieldOf } from "../../shared/helpers/field-of.ts";
+import { CliFailed } from "../../shared/helpers/tagged-errors.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 

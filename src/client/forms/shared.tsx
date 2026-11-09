@@ -11,11 +11,12 @@ import type {
 	UseFormRegisterReturn,
 } from "react-hook-form";
 import { type FieldOf, fieldOf } from "../../shared/helpers/field-of.ts";
-import type { customCat, customWc, readFile } from "../clients.ts";
+import type { customCat, customWc, readFile, searchFile } from "../clients.ts";
 
 /** What any form's mutation fails with. */
 export type FormFailure =
 	| Atom.Failure<typeof readFile>
+	| Atom.Failure<typeof searchFile>
 	| Atom.Failure<typeof customCat>
 	| Atom.Failure<typeof customWc>;
 

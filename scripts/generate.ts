@@ -1,9 +1,9 @@
 // Runs the protocol pipeline: C++ structs → reflect-cpp → JSON Schema →
-// Effect Schema TypeScript, a DTO module and a namespace per C++ operation,
-// and a namespace per bun-side operation from its hand-written DTOs. With
-// --check, writes nothing and fails if any
-// committed artifact is stale, or if src/shared/generated/ holds a file, or
-// a directory, the generator no longer writes.
+// Effect Schema TypeScript, and a BFF operation's hand-written DTOs → JSON
+// Schema → the same: a DTO module and a namespace per operation. With
+// --check, writes nothing and fails if any committed artifact is stale, or
+// if src/shared/generated/ holds a file, or a directory, the generator no
+// longer writes.
 
 import {
 	existsSync,
@@ -25,7 +25,7 @@ const schemaPath = join(root, "cpp/protocol.schema.json");
 const origin: Origin = {
 	cpp: "cpp/include/protocol.hpp",
 	cppHeaders: "cpp/include/protocol",
-	bunSide: "src/shared/bun-side",
+	bunSide: "src/server/bun-side",
 	by: "scripts/generate.ts",
 	into: "src/shared/generated",
 	helpers: "src/shared/helpers/procedure.ts",

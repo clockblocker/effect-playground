@@ -12,7 +12,7 @@ import {
 	setIssues,
 } from "../src/client/forms/shared.tsx";
 import { CustomCat } from "../src/shared/generated/generated.ts";
-import { CliFailed } from "../src/shared/helpers/cli-failed.ts";
+import { CliFailed } from "../src/shared/helpers/tagged-errors.ts";
 
 type Result = AsyncResult.AsyncResult<CustomCat.Success, FormFailure>;
 

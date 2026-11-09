@@ -1,11 +1,12 @@
 # Effect playground
 
-A sandbox for learning Effect. The page has three forms, and each talks to
+A sandbox for learning Effect. The page has four forms, and each talks to
 the BFF over Effect RPC (`effect/rpc`). In the first, type a file name,
-submit, and the file's contents come back. In the second, type an input and
-an output file, and `custom_cat` copies one to the other. In the third, type
-a file name, and `custom_wc` counts its lines, words and bytes. Files live in
-`files/`.
+submit, and the file's contents come back. In the second, type a file name
+and some text, and every line of the file with that text in it comes back.
+In the third, type an input and an output file, and `custom_cat` copies one
+to the other. In the fourth, type a file name, and `custom_wc` counts its
+lines, words and bytes. Files live in `files/`.
 
 A request whose fields are wrong fails with `InvalidRequest`, which lists
 every problem as an **issue**: `{ message, path }`, a Standard Schema
@@ -36,10 +37,13 @@ Who checks the rules depends on the operation:
   Effect's own messages and send nothing that breaks one. The BFF checks a
   request's shape only and leaves the rules to the executable, so every issue
   a copy or a count comes back with is the C++'s, word for word.
-- `ReadFile` is the BFF's own, with no C++ step: its DTOs are written in
-  TypeScript, in `src/shared/bun-side/read-file/read-file-dtos.ts`, with the
-  same name rules as a copy's input, and `BffReader` checks the name with
-  them, then the files.
+- `ReadFile` and `SearchFile` are the BFF's own, with no C++ step: each's
+  DTOs are written in TypeScript, beside the BFF service that serves it, in
+  `src/server/bun-side/read-file/read-file-dtos.ts` and
+  `src/server/bun-side/search-file/search-file-dtos.ts`, with the same name
+  rules as a copy's input. `BffReader` checks a read's name with the
+  generated schema, then the files; `BffSearcher` checks a search's name and
+  query, then reads with `BffReader`.
 
 The **BFF** (backend-for-frontend) is a Bun server; it serves the page over
 RPC, a REST API (`effect/http-api`) for other clients, and an MCP server
@@ -78,7 +82,9 @@ error channel), a `Die` (a defect) or an `Interrupt`.
   the signal's when it's killed,
   `Process interrupted due to receipt of signal: 'SIGKILL'`, and
   `custom_cat timed out after 5000 ms` after five seconds, by default. Only
-  the BFF sees it, so it's declared in TS, in `src/shared/helpers/cli-failed.ts`.
+  the BFF sees it, so it's declared in TS, in
+  `src/shared/helpers/tagged-errors.ts`, which holds the BFF's own errors
+  that cross the wire. An operation's errors are in its DTOs instead.
 - `ContractMismatch` is the BFF and an executable disagreeing: output that
   doesn't decode, such as an issue at a path no request has (an unknown
   flag: the BFF built the flags), output whose tag isn't its exit code's, or
@@ -109,7 +115,8 @@ defect with the schema's message, with no hook to turn it into a typed
 error. So each method's payload schema is its `RequestShape`, the request's
 fields with their types and no rules: a payload that breaks a rule decodes,
 and the handler answers it with the method's `InvalidRequest`, the
-executable's for a copy or a count and `BffReader`'s for a read. Only a payload of the wrong shape
+executable's for a copy or a count, and `BffReader`'s or `BffSearcher`'s for
+a read or a search. Only a payload of the wrong shape
 dies, which the page's client never sends, since it encodes the payload
 with the same schema. The REST body and the MCP tool's parameters are
 `RequestShape`s too.
@@ -157,14 +164,15 @@ the BFF and Vite running.
 What each transport serves:
 
 - RPC, which the page uses: `ReadFile({ name })`,
-  `CustomCat({ inputFile, outputFile })` and `CustomWc({ file })`, all over
-  `POST /rpc`.
-- REST, for other clients: `GET /api/files/read/:name`,
-  `POST /api/files/copy`, whose JSON body is `CustomCat.RequestShape`, and
-  `POST /api/files/count`, whose body is `CustomWc.RequestShape`. A client
-  HttpApi derives from `BffApi` calls them as
+  `SearchFile({ name, query })`, `CustomCat({ inputFile, outputFile })` and
+  `CustomWc({ file })`, all over `POST /rpc`.
+- REST, for other clients: `GET /api/files/read/:name`, and
+  `POST /api/files/search`, `POST /api/files/copy` and
+  `POST /api/files/count`, whose JSON bodies are each operation's
+  `RequestShape`. A client HttpApi derives from `BffApi` calls them as
   `client.files.read({ params: { name } })`,
-  `client.files.copy({ payload })` and `client.files.count({ payload })`. An `InvalidRequest` is a 422 whose body
+  `client.files.search({ payload })`, `client.files.copy({ payload })` and
+  `client.files.count({ payload })`. An `InvalidRequest` is a 422 whose body
   is its JSON, such as
   `{"_tag":"InvalidRequest","issues":[{"message":"Expected a string matching the RegExp ^.+\\.txt$","path":["name"]}]}`.
 - MCP, for MCP clients: the `custom_cat` and `custom_wc` tools, over
@@ -325,7 +333,10 @@ which everything imports from:
 ```
 src/shared/generated/
   generated.ts
+  bun-side/read-file/read-file-dtos.ts
   bun-side/read-file/read-file-namespace.ts
+  bun-side/search-file/search-file-dtos.ts
+  bun-side/search-file/search-file-namespace.ts
   cpp-side/custom-cat/custom-cat-dtos.ts
   cpp-side/custom-cat/custom-cat-namespace.ts
   cpp-side/custom-wc/custom-wc-dtos.ts
@@ -336,18 +347,22 @@ src/shared/generated/
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
    keyword: `CodePoints` `minLength` or `maxLength`, a `PatternValidator` a
    `pattern`; `NotALink` and `ExistingFile` have none.
-2. For each C++ operation, the generator writes its DTOs,
-   `custom-cat-dtos.ts`: what it takes, succeeds with and fails with, as the
-   C++ declares them, and nothing else. `Request` is the payload, `Success`
+2. For each operation, the generator writes its DTOs, `custom-cat-dtos.ts`:
+   what it takes, succeeds with and fails with, as its source declares
+   them, and nothing else. `Request` is the payload, `Success`
    the output's first alternative without its tag, any other struct they use
    keeps its name, each error besides `InvalidRequest` is a
    `Schema.TaggedError` of its fields, whose `message` field is its message,
    and `Errors` lists those. Each keyword becomes Effect's check, with
    Effect's own message: `Schema.isMinCodePoints(5)`,
-   `Schema.isPattern(/^.+\.txt$/u)`. A bun-side operation's DTOs are
-   written by hand, in the same shape, as
-   `src/shared/bun-side/<operation>/<operation>-dtos.ts`, which the
-   generator finds by that name.
+   `Schema.isPattern(/^.+\.txt$/u)`. A C++ operation's source is its
+   header. A BFF operation's is its hand-written DTOs, in the same shape,
+   `src/server/bun-side/<operation>/<operation>-dtos.ts`, which the
+   generator finds by that name and writes again from their JSON Schema, as
+   Effect emits it, so nothing in `src/shared/` imports the BFF's files. A
+   test checks that each generated DTO has its source's JSON Schema: a check
+   JSON Schema can't express, such as a filter of a function, wouldn't
+   survive.
 3. For every operation, from either side, it writes the namespace consumers
    use, `custom-cat-namespace.ts`, named after the operation, `CustomCat`:
    each DTO with its type, then what it derives from the request's JSON
@@ -374,18 +389,28 @@ with one tag.
 
 `BffReader` decodes a read's name with `ReadFile.Request.fields.name`, and a
 name it rejects is an issue with the decode's message, such as
-`Expected a string with at least 5 code points`. Then it refuses a link, a
+`Expected a string with at least 5 code points`. `BffSearcher` decodes each
+of a search's fields so, with an issue for each that fails, such as
+`Expected a value with a length of at least 1` on `["query"]`. Then it refuses a link, a
 literal, `"out.txt" is a link, which could lead outside the files directory`,
 and a file that doesn't exist with the system's message,
-`no such file or directory`. `src/shared/rest-api.ts` gives every
-`InvalidRequest` 422, every `IoFailed` 500 and `CliFailed` 503.
+`no such file or directory`.
+
+`src/shared/rest-api.ts` gives each endpoint `errorsOf(Operation.Failure)`,
+plus `CliFailed` for a C++ operation, and each endpoint with a JSON body a
+middleware, one line with `SchemaErrorsOf`, both in
+`src/shared/helpers/rest-errors.ts`. One table there gives each error its
+status by its tag: `InvalidRequest` 422, `IoFailed` 500 and `CliFailed`
+503. An endpoint's errors are its operation's, so an error a C++ operation
+gains is on its endpoint too, and one whose tag has no status doesn't
+compile until the table gives it one.
 
 `fieldOf(path)` (`src/shared/helpers/field-of.ts`) turns any operation's
 path into react-hook-form's field name, typed: `fieldOf(["inputFile"])` is
 `"inputFile"`, a path `["files", number, "input"]` is
 `` `files.${number}.input` ``.
 
-After changing the structs or a bun-side operation's DTOs, run
+After changing the structs or a BFF operation's DTOs, run
 `bun run generate`: it rebuilds the C++, re-emits the schema and
 regenerates the TypeScript. Both outputs are committed.
 `bun run generate:check` fails if either is stale, or if
@@ -414,25 +439,28 @@ type tests, which `bun run check` runs.
 - `cpp/` holds the protocol, a header per operation in `include/protocol/`,
   `run.hpp` and `files.hpp`, which every executable uses, the executables,
   and the tool that emits the schema. `cpp/build/` is ignored.
-- `src/shared/` is the contract the page and the BFF import: the REST API
-  (`BffApi`), the RPC group (`BffRpcs`), the bun-side operations' DTOs in
-  `bun-side/`, the generated protocol, and `helpers/`: `CliFailed`,
-  `fieldOf`, `withStatus` and `procedure.ts`, what every namespace builds
-  alike.
-- `src/server/` is the BFF: `bun-side/` holds `BffReader`, `cpp-side/` the
+- `src/shared/` is the contract the page and the BFF import, all of it
+  generated or built on what is: the generated protocol, the REST API
+  (`BffApi`), the RPC group (`BffRpcs`), and `helpers/`: `tagged-errors.ts`,
+  the BFF's own errors, `CliFailed`,
+  `fieldOf`, `withStatus`, `rest-errors.ts`, how REST answers an error, and
+  `procedure.ts`, what every namespace builds alike.
+- `src/server/` is the BFF: `bun-side/` holds a directory per operation it
+  serves itself, its DTOs and its service, `read-file/` with `BffReader` and
+  `search-file/` with `BffSearcher`, `cpp-side/` the
   CLI runner and a service per C++ operation, `CustomCatCli` and
   `CustomWcCli`, and `protocols/` the three transports, which `main.ts`
   mounts on one router.
 - `src/client/` builds the RPC client as `AtomRpc` atoms (`effect/reactivity`),
-  `BffRpcClient`, with a mutation per procedure, `readFile`, `customCat` and
-  `customWc`.
+  `BffRpcClient`, with a mutation per procedure, `readFile`, `searchFile`,
+  `customCat` and `customWc`.
   The client's runtime is an atom too, so the protocol is built once, not per
   submit. `main.tsx` wraps the page in `@effect/atom-react`'s
-  `RegistryProvider`, which holds the atoms. `App` renders three forms,
-  `forms/read-file.tsx` (`ReadFileForm`), `forms/run-cli.tsx` (`RunCliForm`)
-  and `forms/count.tsx` (`CountForm`), and passes each its schema,
-  `ReadFile.Request`, `CustomCat.Request` or `CustomWc.Request`, which its
-  react-hook-form resolver uses.
+  `RegistryProvider`, which holds the atoms. `App` renders four forms,
+  `forms/read-file.tsx` (`ReadFileForm`), `forms/search.tsx` (`SearchForm`),
+  `forms/run-cli.tsx` (`RunCliForm`) and `forms/count.tsx` (`CountForm`),
+  and passes each its operation's `Request`, which its react-hook-form
+  resolver uses.
   Each runs its procedure's mutation, which holds an `AsyncResult` of the success
   struct, failing with exactly the procedure's `Failure` (and `CliFailed`, for
   a C++ operation) or the client's `RpcClientError`:

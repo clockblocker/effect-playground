@@ -1,7 +1,8 @@
 import { Cause, Effect, Layer } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { BffRpcs } from "../../shared/rpc.ts";
-import { BffReader } from "../bun-side/bff-reader.ts";
+import { BffReader } from "../bun-side/read-file/read-file.ts";
+import { BffSearcher } from "../bun-side/search-file/search-file.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 import { CustomWcCli } from "../cpp-side/custom-wc.ts";
 
@@ -16,10 +17,12 @@ const logDefects = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 const BffRpcHandlers = BffRpcs.toLayer(
 	Effect.gen(function* () {
 		const reader = yield* BffReader;
+		const searcher = yield* BffSearcher;
 		const cat = yield* CustomCatCli;
 		const wc = yield* CustomWcCli;
 		return BffRpcs.of({
 			ReadFile: ({ name }) => logDefects(reader.read(name)),
+			SearchFile: (request) => logDefects(searcher.search(request)),
 			CustomCat: (request) => logDefects(cat.run(request)),
 			CustomWc: (request) => logDefects(wc.run(request)),
 		});

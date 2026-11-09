@@ -1,7 +1,12 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { CustomCat, CustomWc, ReadFile } from "./generated/generated.ts";
-import { CliFailed } from "./helpers/cli-failed.ts";
+import {
+	CustomCat,
+	CustomWc,
+	ReadFile,
+	SearchFile,
+} from "./generated/generated.ts";
+import { CliFailed } from "./helpers/tagged-errors.ts";
 
 // Every call is a POST to /rpc carrying { tag, payload }, such as
 // { tag: "ReadFile", payload: { name } }. A payload is decoded by its shape
@@ -11,6 +16,11 @@ export class BffRpcs extends RpcGroup.make(
 		payload: ReadFile.RequestShape,
 		success: ReadFile.Success,
 		error: ReadFile.Failure,
+	}),
+	Rpc.make("SearchFile", {
+		payload: SearchFile.RequestShape,
+		success: SearchFile.Success,
+		error: SearchFile.Failure,
 	}),
 	Rpc.make("CustomCat", {
 		payload: CustomCat.RequestShape,

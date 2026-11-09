@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { CustomCat } from "../../shared/generated/generated.ts";
-import type { CliFailed } from "../../shared/helpers/cli-failed.ts";
+import type { CliFailed } from "../../shared/helpers/tagged-errors.ts";
 import { type CliOptions, cliRunner } from "./cli.ts";
 
 // Named for the CLI it runs: CustomCat is already the generated namespace.

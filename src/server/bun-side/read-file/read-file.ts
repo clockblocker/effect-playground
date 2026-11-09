@@ -10,7 +10,7 @@ import {
 	type PlatformError,
 	Schema,
 } from "effect";
-import { ReadFile } from "../../shared/generated/generated.ts";
+import { ReadFile } from "../../../shared/generated/generated.ts";
 
 const invalidName = (message: string) =>
 	new ReadFile.InvalidRequest({ issues: [{ message, path: ["name"] }] });
@@ -97,6 +97,6 @@ export class BffReader extends Context.Service<
 	}
 
 	static readonly layer = BffReader.layerIn(
-		join(import.meta.dirname, "../../.."),
+		join(import.meta.dirname, "../../../.."),
 	);
 }
