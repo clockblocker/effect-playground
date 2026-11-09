@@ -17,35 +17,35 @@
 #include <utility>
 
 #include "files.hpp"
-#include "protocol/common.hpp"
+#include "protocol/wire.hpp"
 
 namespace protocol {
 
-// No rules across a request's fields.
-struct NoRules {
-	template <class T>
-	static rfl::Result<T> validate(T value) noexcept {
-		return value;
-	}
-};
-
-// Reads a Request, checks its Rules once its fields pass theirs, and prints
-// the Output of `action`, which may throw files::IoFailure.
-template <class Output, class Request, class Rules = NoRules>
-int run(int argc, char* argv[], const auto& action) {
+// Runs an operation, in its steps:
+//
+// 1. read: reflect-cpp reads a Request from the flags, with the rules its
+//    fields' types carry, and reports every field that breaks one;
+// 2. check: `check`, a Request → rfl::Result<Request>, asks what the types
+//    can't, such as the files, once every field passes its own rules;
+// 3. act: `act`, a Request → its success, does the work, and may throw
+//    files::IoFailure;
+// 4. print: the success, the InvalidRequest of what 1 or 2 found, or the
+//    IoFailed of 3, as the Output.
+template <class Output, class Request>
+int run(int argc, char* argv[], const auto& check, const auto& act) {
 	const auto print = [](const Output& output) {
 		std::cout << rfl::json::write<Wire>(output) << "\n";
 	};
 	try {
 		auto request =
-			rfl::cli::read<Request, rfl::NoExtraFields>(argc, argv)
-				.and_then(Rules::template validate<Request>);
+			rfl::cli::read<Request, rfl::NoExtraFields>(argc, argv).and_then(
+				check);
 		if (!request) {
 			print(Output(
 				InvalidRequest{.issues = issues(std::move(request).error())}));
 			return 1;
 		}
-		print(Output(action(*request)));
+		print(Output(act(*request)));
 		return 0;
 	} catch (const files::IoFailure& failure) {
 		print(Output(failure.failed));

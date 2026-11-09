@@ -1,18 +1,20 @@
 #pragma once
 
-// custom_wc: counts a file's lines, words and bytes, as wc does.
+// custom_wc's contract: what it takes, as its flags, and what it prints.
+// What it checks and does is in src/custom_wc.cpp.
 
 #include <cstdint>
 #include <rfl.hpp>
 
-#include "common.hpp"
+#include "names.hpp"
+#include "wire.hpp"
 
 namespace protocol {
 
 struct CustomWcRequest {
 	rfl::Description<"The file to count, such as \"hello.txt\", in the files "
 					 "directory.",
-					 Existing>
+					 FileName>
 		file;
 };
 

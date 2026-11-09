@@ -1,58 +1,27 @@
 #pragma once
 
-// custom_cat: copies one file in files/ to another.
+// custom_cat's contract: what it takes, as its flags, and what it prints.
+// What it checks and does is in src/custom_cat.cpp.
 
 #include <cstdint>
-#include <filesystem>
 #include <rfl.hpp>
-#include <string>
-#include <system_error>
 
-#include "common.hpp"
+#include "names.hpp"
+#include "wire.hpp"
 
 namespace protocol {
 
 struct CustomCatRequest {
 	rfl::Description<"The file to copy, such as \"hello.txt\", in the files "
 					 "directory.",
-					 Existing>
+					 FileName>
 		input_file;
 	rfl::Description<
 		"The file to write the copy to, in the files directory, replacing it "
 		"if it exists.",
-		InFiles>
+		FileName>
 		output_file;
 };
-
-struct DifferentNames {
-	static rfl::Result<CustomCatRequest> validate(
-		const CustomCatRequest& request) {
-		if (request.input_file().value() == request.output_file().value()) {
-			return error_on("output_file", "Must not be the input file");
-		}
-		return request;
-	}
-};
-
-// A hard link: NotALink already refuses symbolic ones.
-struct DifferentFiles {
-	static rfl::Result<CustomCatRequest> validate(
-		const CustomCatRequest& request) {
-		const auto& output = request.output_file().value();
-		std::error_code error;
-		if (std::filesystem::equivalent(in_files(request.input_file().value()),
-										in_files(output), error)) {
-			return error_on("output_file",
-							"\"" + output +
-								"\" is the input file under another name");
-		}
-		return request;
-	}
-};
-
-// The rules across a request's fields, which run once reflect-cpp has read
-// it, every field passing its own, and stop at the first that fails.
-using CustomCatRules = rfl::AllOf<DifferentNames, DifferentFiles>;
 
 struct CustomCatSuccess {
 	using Tag = rfl::Literal<"Success">;

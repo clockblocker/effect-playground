@@ -234,11 +234,26 @@ custom_wc --file=hello.txt
   line ends in a newline, and a word is a run of characters that aren't
   whitespace. `{"_tag":"Success","lines":2,"words":7,"bytes":40}`.
 
-Each `main` is one call to `protocol::run` (`cpp/include/run.hpp`) with the
-operation's request, cross-field rules and work; reading and writing files
-is in `cpp/include/files.hpp`. Its flags are the fields of the request,
-which reflect-cpp's CLI reader (`rfl/cli.hpp`) spells in kebab-case. What it
-prints, and its exit codes, the same for every operation:
+An operation is four files' worth of steps, each in its own place:
+
+| Step | Where | For `custom_cat` |
+|---|---|---|
+| its contract: the request, its success, its output | `cpp/include/protocol/<operation>.hpp` | `CustomCatRequest`, `CustomCatSuccess`, `CustomCatOutput` |
+| the rules a field's type carries, which reach the TS form through the schema | `cpp/include/protocol/names.hpp` | both names are a `FileName` |
+| what only the files can say, and every touch of the disk | `cpp/include/files.hpp` | `link_issue`, `missing_issue`, `same_file`, `read_file`, `write_file` |
+| its check and its work | `cpp/src/<operation>.cpp` | `check()`, `copy()` |
+
+and `main` is one call, `protocol::run<Output, Request>(argc, argv, check,
+copy)` (`cpp/include/run.hpp`), which runs the steps in order:
+
+1. read: reflect-cpp reads the request from the flags, which its CLI reader
+   (`rfl/cli.hpp`) spells in kebab-case, with the rules its fields' types
+   carry, and reports every field that breaks one;
+2. check: the operation's `check`, a request → `rfl::Result` of it, asks
+   what the types can't, such as the files, once every field passes its own
+   rules, and puts each issue on its field;
+3. act: the operation's work, which may fail to read or write;
+4. print the output, and exit with its code, the same for every operation:
 
 - 0: stdout is the success, such as `{"_tag":"Success","bytesCopied":18}`.
 - 1, the flags are wrong: stdout is the `InvalidRequest`, with every
@@ -270,8 +285,9 @@ shell scripts.
 ## The protocol
 
 Each C++ operation has a header of its own, `cpp/include/protocol/custom_cat.hpp`
-and `custom_wc.hpp`, which declares its request and output; what they share
-is in `cpp/include/protocol/common.hpp`. `cpp/include/protocol.hpp`
+and `custom_wc.hpp`, which declares its request and output, and nothing
+else; what every output shares is in `cpp/include/protocol/wire.hpp`, and
+the name rules in `names.hpp`. `cpp/include/protocol.hpp`
 includes them all and lists them in `Procedures`, which is what the
 generator reads. A procedure's `output` is a tagged union of its success,
 whose `using Tag = rfl::Literal<"Success">` names it, `InvalidRequest`, a
@@ -279,71 +295,64 @@ list of `Issue`s, which are structs there too, and `IoFailed`, whose one
 field is its `message`. Fields are snake_case in C++ and camelCase in JSON,
 through reflect-cpp's `SnakeCaseToCamelCase` (`protocol::Wire`).
 
-A field carries its rules in its type, an `rfl::Validator` of reflect-cpp
-validators: reflect-cpp's own where it has one, and otherwise a struct with
-reflect-cpp's validator interface, `static rfl::Result<T> validate(T)`:
+A field carries the rules a JSON Schema can say in its type, an
+`rfl::Validator` of reflect-cpp validators: reflect-cpp's own where it has
+one, and otherwise a struct with its validator interface,
+`static rfl::Result<T> validate(T)`, and a `to_schema`. reflect-cpp checks
+them when it reads a request and writes them into the schema, so the TS
+form checks them too:
 
 ```cpp
 using PlainName =
 	rfl::PatternValidator<R"(^(?!\.\.?$)[^/\\]*$)", "plain file name">;
 using TxtFile = rfl::PatternValidator<R"(^.+\.txt$)", ".txt file name">;
-struct NotALink {
-	static rfl::Result<std::string> validate(const std::string& name);
-};
-template <class... More>
-using InFilesName =
-	rfl::Validator<std::string,
-				   Checks<CodePoints<rfl::Minimum<5>>,
-						  CodePoints<rfl::Maximum<25>>, PlainName, TxtFile,
-						  NotALink, More...>>;
-using InFiles = InFilesName<>;
-using Existing = InFilesName<ExistingFile>;
+using FileName =
+	rfl::Validator<std::string, CodePoints<rfl::Minimum<5>>,
+				   CodePoints<rfl::Maximum<25>>, PlainName, TxtFile>;
 ```
 
-An issue's message is the validator's error as reflect-cpp reports it:
+A field reports the first of its rules it breaks, so `x.md` is too short
+and nothing else, and reflect-cpp reports every field that breaks one. What
+a schema can't say, such as what the files are, is the operation's `check`,
+which runs once every field passes its own rules, and puts each issue on its
+field with `protocol::FieldIssues`, or `error_on` for one:
 
-| Rule | Validator | Message |
+```cpp
+rfl::Result<CustomCatRequest> check(const CustomCatRequest& request) {
+	// each name on its own, every field at once …
+	if (auto link = files::link_issue(input)) issues.add("input_file", *link);
+	// … then the two together, the first that fails
+	if (input == output) return protocol::error_on("output_file", "Must not be the input file");
+	…
+}
+```
+
+An issue's message is the rule's own:
+
+| Rule | Where | Message |
 |---|---|---|
-| valid UTF-8 | `CodePoints<…>` | `String is not valid UTF-8.` |
-| 5 or more characters | `CodePoints<rfl::Minimum<5>>` | `Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.` |
-| 25 or fewer | `CodePoints<rfl::Maximum<25>>` | `Code point count validation failed: Value expected to be less than or equal to 25, but got 27.` |
-| a plain name | `PlainName` | `String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.` |
-| `.txt` | `TxtFile` | `String 'config.json' did not match format '.txt file name': '^.+\.txt$'.` |
-| not a link | `NotALink` | `"out.txt" is a link, which could lead outside the files directory` |
-| exists | `ExistingFile` | the `std::error_code`'s message: `No such file or directory` |
-| present | none: reflect-cpp's read | `Field named 'output-file' not found.` |
-| not the input | `DifferentNames` | `Must not be the input file` |
-| not a hard link to the input | `DifferentFiles` | `"same.txt" is the input file under another name` |
+| present | reflect-cpp's read | `Field named 'output-file' not found.` |
+| valid UTF-8 | `CodePoints<…>`, in the type | `String is not valid UTF-8.` |
+| 5 or more characters | `CodePoints<rfl::Minimum<5>>`, in the type | `Code point count validation failed: Value expected to be greater than or equal to 5, but got 4.` |
+| 25 or fewer | `CodePoints<rfl::Maximum<25>>`, in the type | `Code point count validation failed: Value expected to be less than or equal to 25, but got 27.` |
+| a plain name | `PlainName`, in the type | `String '../x.txt' did not match format 'plain file name': '^(?!\.\.?$)[^/\\]*$'.` |
+| `.txt` | `TxtFile`, in the type | `String 'config.json' did not match format '.txt file name': '^.+\.txt$'.` |
+| not a link | `files::link_issue`, in the check | `"out.txt" is a link, which could lead outside the files directory` |
+| exists, for a file read | `files::missing_issue`, in the check | the `std::error_code`'s message: `No such file or directory` |
+| not the input | `custom_cat`'s check | `Must not be the input file` |
+| not a hard link to the input | `custom_cat`'s check, with `files::same_file` | `"same.txt" is the input file under another name` |
 
 `CodePoints<V>` is `rfl::Size<V>` counting a string's code points, not its
 bytes, with `Size`'s schema: JSON Schema's `minLength` and `maxLength`, and
 so the form, count code points too, so both sides take the same names. The
 comparison and its words are the wrapped `rfl::Minimum` or `rfl::Maximum`'s.
 
-`Checks<…>` is `rfl::AllOf`, which stops at a field's first rule that fails,
-so `x.md` is too short and nothing else, and the rules come before what the
-files say. It differs only in its schema, which leaves out the validators
-that have none, `NotALink` and `ExistingFile`: `rfl::AllOf` wants one from
-each. A copy's `input_file` and a count's `file` are `Existing`, and a
-copy's `output_file` `InFiles`, so only the files read must exist.
-
-A rule across fields is a validator of the request, which puts its error on
-a field with `error_on`:
-
-```cpp
-struct DifferentNames {
-	static rfl::Result<CustomCatRequest> validate(
-		const CustomCatRequest& request);  // error_on("output_file", …)
-};
-using CustomCatRules = rfl::AllOf<DifferentNames, DifferentFiles>;
-```
-
-`run` reads the request with reflect-cpp, which runs every field's rules and
-fails with each that does, then the operation's rules, in order, which stop
-at the first that fails. Either way the read's `rfl::Error` lists each
-failure in `details()`, a message and a path, and `protocol::issues` makes
-each an `Issue`, its path the fields' wire names, `["inputFile"]`, and an
-array's indexes as numbers.
+Since the check runs once the read passes, a request with a name that
+breaks a rule and a file that's missing gets the rule's issue first, and the
+missing file's once the name is fixed. Either way, the read's or the check's
+`rfl::Error` lists each failure in `details()`, a message and a path, and
+`protocol::issues` makes each an `Issue`, its path the fields' wire names,
+`["inputFile"]`, and an array's indexes as numbers.
 
 `bun run generate` (`scripts/generate.ts`) writes, under
 `src/shared/generated/`, a directory per operation under the side that
@@ -366,7 +375,8 @@ src/shared/generated/
 1. reflect-cpp turns the structs into JSON Schema: `cpp/build/protocol_schema`
    writes `cpp/protocol.schema.json`. A validator with a schema becomes its
    keyword: `CodePoints` `minLength` or `maxLength`, a `PatternValidator` a
-   `pattern`; `NotALink` and `ExistingFile` have none.
+   `pattern`. What only the files can say is in each operation's check,
+   not in its types, so it isn't in the schema.
 2. For each operation, the generator writes its DTOs, `custom-cat-dtos.ts`:
    what it takes, succeeds with and fails with, as its source declares
    them, and nothing else. `Request` is the payload, `Success`
@@ -457,9 +467,11 @@ type tests, which `bun run check` runs.
 
 ## Layout
 
-- `cpp/` holds the protocol, a header per operation in `include/protocol/`,
-  `run.hpp` and `files.hpp`, which every executable uses, the executables,
-  and the tool that emits the schema. `cpp/build/` is ignored.
+- `cpp/` holds the protocol in `include/protocol/`: a contract per
+  operation, `names.hpp` and `wire.hpp`; `files.hpp`, every touch of the
+  disk, and `run.hpp`, the steps every executable runs; in `src/`, each
+  executable's check and work, and the tool that emits the schema.
+  `cpp/build/` is ignored.
 - `src/shared/` is the contract the page and the BFF import, all of it
   generated or built on what is: the generated protocol, the REST API
   (`BffApi`), the RPC group (`BffRpcs`), and `helpers/`: `tagged-errors.ts`,

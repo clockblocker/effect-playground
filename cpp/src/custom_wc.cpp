@@ -2,8 +2,8 @@
 //
 // Counts the lines, words and bytes of files/NAME, under the working
 // directory, as wc does: a line ends in a newline, and a word is a run of
-// characters that aren't whitespace. The flags are protocol::CustomWcRequest;
-// run() reads them and prints the output, with custom_cat's exit codes.
+// characters that aren't whitespace. Its contract is protocol/custom_wc.hpp,
+// and run.hpp runs its steps: read the flags, check, count, print.
 
 #include <cctype>
 #include <cstdint>
@@ -15,7 +15,21 @@
 
 namespace {
 
-protocol::CustomWcSuccess count(const protocol::CustomWcRequest& request) {
+using protocol::CustomWcRequest;
+
+// What the name's type can't say: the file is there, and isn't a link.
+rfl::Result<CustomWcRequest> check(const CustomWcRequest& request) {
+	const std::string& file = request.file().value();
+	if (auto link = files::link_issue(file)) {
+		return protocol::error_on("file", *link);
+	}
+	if (auto missing = files::missing_issue(file)) {
+		return protocol::error_on("file", *missing);
+	}
+	return request;
+}
+
+protocol::CustomWcSuccess count(const CustomWcRequest& request) {
 	const std::string text = files::read_file(request.file().value());
 	std::uint64_t lines = 0;
 	std::uint64_t words = 0;
@@ -32,6 +46,6 @@ protocol::CustomWcSuccess count(const protocol::CustomWcRequest& request) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-	return protocol::run<protocol::CustomWcOutput, protocol::CustomWcRequest>(
-		argc, argv, count);
+	return protocol::run<protocol::CustomWcOutput, CustomWcRequest>(
+		argc, argv, check, count);
 }

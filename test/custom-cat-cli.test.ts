@@ -95,19 +95,15 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 		);
 	});
 
-	test("fails with the generated InvalidRequest, every issue in it", async () => {
-		const result = await run({
+	test("fails with the generated InvalidRequest, the names' rules before the files'", async () => {
+		const malformed = await run({
 			inputFile: "missing.txt",
 			outputFile: "copy.json",
 		});
-		expect(result).toEqual(
+		expect(malformed).toEqual(
 			Result.fail(
 				new CustomCat.InvalidRequest({
 					issues: [
-						{
-							message: "No such file or directory",
-							path: ["inputFile"],
-						},
 						{
 							message:
 								"String 'copy.json' did not match format '.txt file name': '^.+\\.txt$'.",
@@ -117,8 +113,22 @@ describe.skipIf(Bun.which("cmake") === null)("CustomCatCli", () => {
 				}),
 			),
 		);
-		expect(Result.isFailure(result) && result.failure).toBeInstanceOf(
+		expect(Result.isFailure(malformed) && malformed.failure).toBeInstanceOf(
 			CustomCat.InvalidRequest,
+		);
+		expect(
+			await run({ inputFile: "missing.txt", outputFile: "copy.txt" }),
+		).toEqual(
+			Result.fail(
+				new CustomCat.InvalidRequest({
+					issues: [
+						{
+							message: "No such file or directory",
+							path: ["inputFile"],
+						},
+					],
+				}),
+			),
 		);
 	});
 
