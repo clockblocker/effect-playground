@@ -11,7 +11,7 @@ import {
 	Outcome,
 	setIssues,
 } from "../src/client/forms/shared.tsx";
-import { CliFailed } from "../src/shared/cli-failed.ts";
+import { CliFailed } from "../src/shared/helpers/cli-failed.ts";
 import { CustomCat } from "../src/shared/generated/protocol.ts";
 
 type Result = AsyncResult.AsyncResult<CustomCat.Success, FormFailure>;

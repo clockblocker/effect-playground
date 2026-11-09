@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { emit } from "../scripts/protocol/emit.ts";
 import { normalize } from "../scripts/protocol/normalize.ts";
-import { fieldOf } from "../src/shared/field-of.ts";
+import { fieldOf } from "../src/shared/helpers/field-of.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 import { ReadFile } from "../src/shared/read-file.ts";
 

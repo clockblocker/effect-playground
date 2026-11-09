@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/rpc";
-import { CliFailed } from "./cli-failed.ts";
 import { CustomCat } from "./generated/protocol.ts";
+import { CliFailed } from "./helpers/cli-failed.ts";
 import { ReadFile } from "./read-file.ts";
 
 // Every call is a POST to /rpc carrying { tag, payload }, such as

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { StandardSchema } from "effect";
-import { type FieldOf, fieldOf } from "../src/shared/field-of.ts";
+import { type FieldOf, fieldOf } from "../src/shared/helpers/field-of.ts";
 import type { CustomCat } from "../src/shared/generated/protocol.ts";
 import type { ReadFile } from "../src/shared/read-file.ts";
 

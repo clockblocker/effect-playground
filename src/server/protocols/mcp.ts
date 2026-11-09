@@ -1,7 +1,7 @@
 import { Effect, Layer, Schema } from "effect";
 import { McpProtocol, McpServer, Tool, Toolkit } from "effect/ai";
-import { CliFailed } from "../../shared/cli-failed.ts";
-import { fieldOf } from "../../shared/field-of.ts";
+import { CliFailed } from "../../shared/helpers/cli-failed.ts";
+import { fieldOf } from "../../shared/helpers/field-of.ts";
 import { CustomCat } from "../../shared/generated/protocol.ts";
 import { CustomCatCli } from "../cpp-side/custom-cat.ts";
 

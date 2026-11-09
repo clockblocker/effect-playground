@@ -6,24 +6,10 @@ import {
 	HttpApiMiddleware,
 	HttpApiSchema,
 } from "effect/http-api";
-import { CliFailed } from "./cli-failed.ts";
 import { CustomCat, IoFailed } from "./generated/protocol.ts";
+import { CliFailed } from "./helpers/cli-failed.ts";
+import { withStatus } from "./helpers/with-status.ts";
 import { ReadFile } from "./read-file.ts";
-
-// HttpApiSchema.status keeps what a schema decodes to and from, but Effect
-// types the annotated schema by its internals (decodeTo<declareConstructor…>),
-// so hovers turn unreadable. This names just what is kept.
-const withStatus =
-	(code: number) =>
-	<S extends Schema.Top>(
-		self: S,
-	): Schema.Codec<
-		S["Type"],
-		S["Encoded"],
-		S["DecodingServices"],
-		S["EncodingServices"]
-	> =>
-		self.pipe(HttpApiSchema.status(code));
 
 const readFileInvalid = ReadFile.InvalidRequest.pipe(withStatus(422));
 const customCatInvalid = CustomCat.InvalidRequest.pipe(withStatus(422));

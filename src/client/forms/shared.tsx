@@ -10,7 +10,7 @@ import type {
 	Resolver,
 	UseFormRegisterReturn,
 } from "react-hook-form";
-import { type FieldOf, fieldOf } from "../../shared/field-of.ts";
+import { type FieldOf, fieldOf } from "../../shared/helpers/field-of.ts";
 import type { customCat, readFile } from "../clients.ts";
 
 /** What either form's mutation fails with. */

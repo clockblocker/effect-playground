@@ -18,7 +18,7 @@ import {
 	ContractMismatch,
 	CustomCatCli,
 } from "../src/server/cpp-side/custom-cat.ts";
-import { CliFailed } from "../src/shared/cli-failed.ts";
+import { CliFailed } from "../src/shared/helpers/cli-failed.ts";
 import { CustomCat, IoFailed } from "../src/shared/generated/protocol.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "custom-cat-cli-"));
