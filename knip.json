@@ -5,7 +5,7 @@
 		"test/**/*.test.ts",
 		"src/server/bun-side/*/*-dtos.ts"
 	],
-	"ignoreDependencies": ["@effect/platform-node-shared"],
+	"ignoreDependencies": ["@effect/platform-node-shared", "@swc/core"],
 	"ignoreIssues": {
 		"src/shared/generated/**": ["namespaceMembers"]
 	}

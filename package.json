@@ -12,6 +12,7 @@
 		"lint": "biome check --error-on-warnings .",
 		"fix": "biome check --write .",
 		"knip": "knip",
+		"deps": "depcruise --config .dependency-cruiser.cjs src test scripts",
 		"test": "bun test",
 		"generate": "bun scripts/generate.ts",
 		"generate:check": "bun scripts/generate.ts --check"
@@ -28,10 +29,12 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",
+		"@swc/core": "1.16.22",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.4",
 		"@vitejs/plugin-react": "^6.0.5",
 		"bun-types": "1.4.2",
+		"dependency-cruiser": "18.7.2",
 		"knip": "^6.29.0",
 		"typescript": "^7.0.2",
 		"vite": "^8.1.5"

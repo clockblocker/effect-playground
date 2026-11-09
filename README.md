@@ -427,6 +427,7 @@ error's field that would shadow the `Error`'s own, such as `name`.
 bun run check            # tsc
 bun run lint             # biome; bun run fix formats
 bun run knip
+bun run deps             # dependency-cruiser: the generated protocol only through generated.ts
 bun run test             # builds the C++; runs the executables, the BFF and the forms' matching
 bun run generate:check
 ```
@@ -487,3 +488,8 @@ type tests, which `bun run check` runs.
 `@effect/platform-node-shared` is pinned to 4.0.7 only to match
 `effect` 4.0.7. `@effect/platform-bun` asks for `^4.0.7`, which would pull in
 4.1, and 4.1 needs effect 4.1.
+
+`@swc/core` is there for dependency-cruiser alone, which parses with it
+(`parser: "swc"`): TypeScript 7 has no compiler API to parse with. Nothing
+imports it, so knip ignores it. Its postinstall script stays blocked; its
+platform binary comes as an optional dependency, which is all it needs.
