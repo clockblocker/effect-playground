@@ -28,8 +28,9 @@
 // connection-wide {"error":{"_tag":"Defect",...}}, which fails every call the
 // client has in flight.
 
+#include <nlohmann/json.hpp>
 #include <optional>
-#include <rfl.hpp>
+#include <rfl/nlohmann.hpp>
 #include <string>
 #include <string_view>
 
@@ -47,24 +48,25 @@ std::optional<std::string> handle_frame(std::string_view frame,
 										const Operations& operations);
 
 // A response with `result`, already on the wire.
-std::string result(const rfl::Generic& id, const rfl::Generic& value);
+std::string result(const nlohmann::json& id, const nlohmann::json& value);
 
 // A response with a Cause of one Fail of `error`, already on the wire.
-std::string failure(const rfl::Generic& id, const std::string& message,
-					const rfl::Generic& error);
+std::string failure(const nlohmann::json& id, const std::string& message,
+					const nlohmann::json& error);
 
 // An operation's success, as a response.
 template <class Success>
-std::string succeed(const rfl::Generic& id, const Success& success) {
-	return result(id, rfl::to_generic<protocol::Wire>(success));
+std::string succeed(const nlohmann::json& id, const Success& success) {
+	return result(id, rfl::nlohmann::write<protocol::Wire>(success));
 }
 
 // An operation's failure, tagged, as a response.
 template <class Error>
-std::string fail(const rfl::Generic& id, const Error& error) {
+std::string fail(const nlohmann::json& id, const Error& error) {
 	return failure(
 		id, protocol::message_of(error),
-		rfl::to_generic<protocol::Wire>(rfl::TaggedUnion<"_tag", Error>(error)));
+		rfl::nlohmann::write<protocol::Wire>(
+			rfl::TaggedUnion<"_tag", Error>(error)));
 }
 
 }  // namespace json_rpc

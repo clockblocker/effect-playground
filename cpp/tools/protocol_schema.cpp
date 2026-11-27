@@ -8,9 +8,7 @@
 #include "domain/protocol.hpp"
 
 int main() {
-	const auto document =
-		rfl::json::read<rfl::Generic>(
-			rfl::json::to_schema<protocol::Procedures, protocol::Wire>())
-			.value();
-	std::cout << rfl::json::write(document, rfl::json::pretty) << "\n";
+	std::cout << rfl::json::to_schema<protocol::Procedures, protocol::Wire,
+									  rfl::NoExtraFields>(rfl::json::pretty)
+			  << "\n";
 }

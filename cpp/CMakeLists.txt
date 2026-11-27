@@ -32,7 +32,6 @@ add_library(domain STATIC
 	domain/files.cpp
 	domain/operations/custom_cat.cpp
 	domain/operations/custom_wc.cpp
-	domain/protocol/names.cpp
 	domain/protocol/wire.cpp
 )
 target_include_directories(domain PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

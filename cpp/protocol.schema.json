@@ -18,7 +18,7 @@
                     "$ref": "#/$defs/protocol__CustomCatRequest"
                 },
                 "output": {
-                    "anyOf": [
+                    "oneOf": [
                         {
                             "$ref": "#/$defs/protocol__CustomCatSuccess__tagged"
                         },
@@ -34,7 +34,8 @@
             "required": [
                 "payload",
                 "output"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__CustomCatRequest": {
             "type": "object",
@@ -85,7 +86,8 @@
             "required": [
                 "inputFile",
                 "outputFile"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__CustomCatSuccess__tagged": {
             "type": "object",
@@ -104,7 +106,8 @@
             "required": [
                 "_tag",
                 "bytesCopied"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__CustomWc": {
             "type": "object",
@@ -113,7 +116,7 @@
                     "$ref": "#/$defs/protocol__CustomWcRequest"
                 },
                 "output": {
-                    "anyOf": [
+                    "oneOf": [
                         {
                             "$ref": "#/$defs/protocol__CustomWcSuccess__tagged"
                         },
@@ -129,7 +132,8 @@
             "required": [
                 "payload",
                 "output"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__CustomWcRequest": {
             "type": "object",
@@ -158,7 +162,8 @@
             },
             "required": [
                 "file"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__CustomWcSuccess__tagged": {
             "type": "object",
@@ -187,7 +192,8 @@
                 "lines",
                 "words",
                 "bytes"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__InvalidRequest__tagged": {
             "type": "object",
@@ -210,7 +216,8 @@
             "required": [
                 "_tag",
                 "issues"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__IoFailed__tagged": {
             "type": "object",
@@ -229,7 +236,8 @@
             "required": [
                 "_tag",
                 "message"
-            ]
+            ],
+            "additionalProperties": false
         },
         "protocol__Issue": {
             "type": "object",
@@ -256,7 +264,8 @@
             "required": [
                 "message",
                 "path"
-            ]
+            ],
+            "additionalProperties": false
         }
     }
 }
