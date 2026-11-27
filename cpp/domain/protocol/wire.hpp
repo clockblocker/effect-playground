@@ -50,19 +50,4 @@ std::string message_of(const IoFailed& error);
 // wire names, such as "inputFile", and an array's indexes as numbers.
 std::vector<Issue> issues(rfl::Error&& error);
 
-// The issues a check finds, each on a field by its C++ name, as reflect-cpp
-// reports a read's, so that the server answers both alike.
-class FieldIssues {
-   public:
-	void add(std::string field, std::string message);
-	bool empty() const noexcept;
-	rfl::Unexpected<rfl::Error> error() const;
-
-   private:
-	std::vector<rfl::ErrorDetail> details_;
-};
-
-// One issue, on the field `name`.
-rfl::Unexpected<rfl::Error> error_on(std::string name, std::string message);
-
 }  // namespace protocol

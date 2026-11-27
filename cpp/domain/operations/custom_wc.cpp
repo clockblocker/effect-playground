@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include "domain/files.hpp"
 
@@ -13,10 +14,14 @@ using protocol::CustomWcRequest;
 rfl::Result<CustomWcRequest> check(const CustomWcRequest& request) {
 	const std::string& file = request.file().value();
 	if (auto link = files::link_issue(file)) {
-		return protocol::error_on("file", *link);
+		return rfl::error(
+			rfl::Error(std::move(*link), rfl::ErrorKind::constraint_violation)
+				.in_field("file"));
 	}
 	if (auto missing = files::missing_issue(file)) {
-		return protocol::error_on("file", *missing);
+		return rfl::error(
+			rfl::Error(std::move(*missing), rfl::ErrorKind::constraint_violation)
+				.in_field("file"));
 	}
 	return request;
 }

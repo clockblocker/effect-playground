@@ -186,8 +186,9 @@ function procedure(
 		return ref.slice(definitionRef.length);
 	};
 	const output = field("output");
+	const outputBranches = output.oneOf ?? output.anyOf;
 	const alternatives = (
-		Array.isArray(output.anyOf) ? output.anyOf : [output]
+		Array.isArray(outputBranches) ? outputBranches : [output]
 	).map((alternative) => refName(alternative, "output"));
 	const [success, invalidRequest, ...errors] = alternatives;
 	const successTag =

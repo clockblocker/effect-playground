@@ -54,25 +54,4 @@ std::vector<Issue> issues(rfl::Error&& error) {
 	return issues;
 }
 
-void FieldIssues::add(std::string field, std::string message) {
-	details_.push_back(rfl::ErrorDetail{.path = {std::move(field)},
-										.message = std::move(message)});
-}
-
-bool FieldIssues::empty() const noexcept { return details_.empty(); }
-
-rfl::Unexpected<rfl::Error> FieldIssues::error() const {
-	std::string what;
-	for (const auto& detail : details_) {
-		what += (what.empty() ? "" : "; ") + detail.message;
-	}
-	return rfl::error(rfl::Error(std::move(what), details_));
-}
-
-rfl::Unexpected<rfl::Error> error_on(std::string name, std::string message) {
-	FieldIssues issues;
-	issues.add(std::move(name), std::move(message));
-	return issues.error();
-}
-
 }  // namespace protocol

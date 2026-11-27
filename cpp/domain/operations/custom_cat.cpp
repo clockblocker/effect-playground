@@ -1,6 +1,8 @@
 #include "domain/operations/custom_cat.hpp"
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "domain/files.hpp"
 
@@ -12,24 +14,37 @@ rfl::Result<CustomCatRequest> check(const CustomCatRequest& request) {
 	const std::string& input = request.input_file().value();
 	const std::string& output = request.output_file().value();
 
-	protocol::FieldIssues issues;
+	std::vector<rfl::Error> errors;
 	if (auto link = files::link_issue(input)) {
-		issues.add("input_file", *link);
+		errors.push_back(
+			rfl::Error(std::move(*link), rfl::ErrorKind::constraint_violation)
+				.in_field("input_file"));
 	} else if (auto missing = files::missing_issue(input)) {
-		issues.add("input_file", *missing);
+		errors.push_back(
+			rfl::Error(std::move(*missing), rfl::ErrorKind::constraint_violation)
+				.in_field("input_file"));
 	}
 	if (auto link = files::link_issue(output)) {
-		issues.add("output_file", *link);
+		errors.push_back(
+			rfl::Error(std::move(*link), rfl::ErrorKind::constraint_violation)
+				.in_field("output_file"));
 	}
-	if (!issues.empty()) return issues.error();
+	if (!errors.empty()) {
+		return rfl::error(rfl::Error::combine(std::move(errors)));
+	}
 
 	if (input == output) {
-		return protocol::error_on("output_file", "Must not be the input file");
+		return rfl::error(
+			rfl::Error("Must not be the input file",
+					   rfl::ErrorKind::constraint_violation)
+				.in_field("output_file"));
 	}
 	// A hard link: link_issue already refuses symbolic ones.
 	if (files::same_file(input, output)) {
-		return protocol::error_on(
-			"output_file", "\"" + output + "\" is the input file under another name");
+		return rfl::error(
+			rfl::Error("\"" + output + "\" is the input file under another name",
+					   rfl::ErrorKind::constraint_violation)
+				.in_field("output_file"));
 	}
 	return request;
 }

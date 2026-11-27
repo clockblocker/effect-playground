@@ -14,7 +14,8 @@
 
 #include <functional>
 #include <map>
-#include <rfl.hpp>
+#include <nlohmann/json.hpp>
+#include <rfl/nlohmann.hpp>
 #include <string>
 #include <utility>
 
@@ -25,8 +26,8 @@
 namespace server {
 
 // What answers a request: its id and params → the response line.
-using Handler =
-	std::function<std::string(const rfl::Generic& id, const rfl::Generic& params)>;
+using Handler = std::function<std::string(const nlohmann::json& id,
+										  const nlohmann::json& params)>;
 
 class Operations {
    public:
@@ -54,10 +55,12 @@ std::string name_of() {
 template <class Procedure>
 void Operations::add(auto check, auto act) {
 	using Request = decltype(Procedure::payload);
-	handlers_[name_of<Procedure>()] = [check, act](const rfl::Generic& id,
-												   const rfl::Generic& params) {
+	handlers_[name_of<Procedure>()] = [check, act](
+										  const nlohmann::json& id,
+										  const nlohmann::json& params) {
 		auto request =
-			rfl::from_generic<Request, protocol::Wire, rfl::NoExtraFields>(params)
+			rfl::nlohmann::read<Request, protocol::Wire, rfl::NoExtraFields>(
+				params)
 				.and_then(check);
 		if (!request) {
 			return json_rpc::fail(
