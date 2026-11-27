@@ -10,16 +10,17 @@ endif()
 
 include(FetchContent)
 
-# JSON only, with the yyjson that ships inside reflect-cpp: no vcpkg, no conan.
+# JSON (bundled yyjson) + nlohmann adapter from reflect-cpp showcase/all-lanes.
 set(REFLECTCPP_JSON ON CACHE BOOL "" FORCE)
+set(REFLECTCPP_NLOHMANN ON CACHE BOOL "" FORCE)
 set(REFLECTCPP_USE_BUNDLED_DEPENDENCIES ON CACHE BOOL "" FORCE)
 set(REFLECTCPP_USE_VCPKG OFF CACHE BOOL "" FORCE)
 set(REFLECTCPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# main at e91ea28, after v0.27.1: the first with rfl::Error::details() (#766).
 FetchContent_Declare(
 	reflectcpp
-	URL https://github.com/munich-data-engineering/reflect-cpp/archive/e91ea28f0dd49058109e80a03cdf593cd4977856.tar.gz
-	URL_HASH SHA256=0f5dd79386aea5e078c56eb142dd9d50723b11bd0fa63e12338900e22a8f2339
+	GIT_REPOSITORY https://github.com/clockblocker/reflect-cpp.git
+	GIT_TAG showcase/all-lanes
+	GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(reflectcpp)
 
